@@ -1,9 +1,5 @@
 import { NextResponse } from "next/server";
-import {
-  createPmtHouseClient,
-  ensureAppUserProvisioned,
-  PmtHouseError,
-} from "@/lib/pymthouse";
+import { getBillingSnapshot, PmtHouseError } from "@/lib/pymthouse";
 import { getPrimaryOrchestrator } from "@/lib/orchestrators";
 
 export const runtime = "nodejs";
@@ -16,34 +12,17 @@ export async function GET(request: Request) {
   }
 
   try {
-    await ensureAppUserProvisioned(externalUserId);
-    const client = createPmtHouseClient();
-    const [balance, billing] = await Promise.all([
-      client.getUsageBalance(externalUserId).catch(() => null),
-      client.getBillingState(externalUserId).catch(() => null),
-    ]);
-
-    const status = billing?.status;
-    const mapped =
-      status === "blocked" || status === "at_risk" || status === "overage" || status === "active"
-        ? status
-        : status
-          ? "active"
-          : null;
-
+    const { balance, billingState } = await getBillingSnapshot(externalUserId);
     return NextResponse.json({
-      balanceUsdMicros:
-        balance && typeof balance === "object" && "balanceUsdMicros" in balance
-          ? String((balance as { balanceUsdMicros: string }).balanceUsdMicros)
-          : "0",
-      billing:
-        billing?.explain && mapped
-          ? {
-              state: mapped,
-              headline: billing.explain.headline,
-              detail: billing.explain.detail,
-            }
-          : null,
+      balanceUsdMicros: balance.balanceUsdMicros,
+      consumedUsdMicros: balance.consumedUsdMicros,
+      lifetimeGrantedUsdMicros: balance.lifetimeGrantedUsdMicros,
+      billing: {
+        state: billingState.status,
+        headline: billingState.explain.headline,
+        detail: billingState.explain.detail,
+      },
+      billingState,
       orchestrator: getPrimaryOrchestrator().label,
     });
   } catch (error) {

@@ -7,7 +7,7 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as {
       externalUserId?: string;
-      amountUsd?: number;
+      amountUsd?: number | string;
     };
     if (!body.externalUserId?.trim()) {
       return NextResponse.json({ error: "externalUserId required" }, { status: 400 });

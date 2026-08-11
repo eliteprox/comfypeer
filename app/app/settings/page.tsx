@@ -5,15 +5,17 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { LogoMark } from "@/components/Logo";
 import { Button } from "@/components/Button";
+import { BillingPanel } from "@/components/BillingPanel";
 import { useAuth } from "@/components/AuthProvider";
 
 export default function SettingsPage() {
   const { user, ready, signOut } = useAuth();
   const router = useRouter();
   const [keyBusy, setKeyBusy] = useState(false);
-  const [revealed, setRevealed] = useState<{ apiKey?: string; sdkToken?: string } | null>(null);
+  const [revealed, setRevealed] = useState<{ apiKey?: string; sdkToken?: string } | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
-  const [topUpBusy, setTopUpBusy] = useState(false);
 
   useEffect(() => {
     if (ready && !user) router.replace("/login");
@@ -51,45 +53,6 @@ export default function SettingsPage() {
     }
   }
 
-  async function topUp() {
-    setTopUpBusy(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/pymthouse/top-up", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ externalUserId: user!.id, amountUsd: 10 }),
-      });
-      const data = (await res.json()) as { url?: string; error?: string };
-      if (!res.ok) throw new Error(data.error || "Top-up failed");
-      const checkoutUrl = data.url?.trim();
-      if (!checkoutUrl) {
-        setError("No checkout URL returned — Connect may not be ready.");
-        return;
-      }
-      let parsed: URL;
-      try {
-        parsed = new URL(checkoutUrl);
-      } catch {
-        setError("Invalid checkout URL.");
-        return;
-      }
-      const allowedHost =
-        parsed.protocol === "https:" &&
-        (parsed.hostname === "checkout.stripe.com" ||
-          parsed.hostname.endsWith(".stripe.com"));
-      if (!allowedHost) {
-        setError("Checkout URL host is not allowed.");
-        return;
-      }
-      window.location.assign(parsed.toString());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Top-up failed");
-    } finally {
-      setTopUpBusy(false);
-    }
-  }
-
   return (
     <div className="min-h-screen bg-canvas">
       <header className="flex h-12 items-center gap-3 border-b border-border px-4">
@@ -113,18 +76,8 @@ export default function SettingsPage() {
         </section>
 
         <section id="billing">
-          <h2 className="text-lg font-semibold text-fg">Billing</h2>
-          <p className="mt-1 text-sm text-muted">
-            Prepaid top-up via PymtHouse Stripe Checkout ($1–$10,000).
-          </p>
-          <Button
-            type="button"
-            onClick={() => void topUp()}
-            disabled={topUpBusy}
-            className="mt-4"
-          >
-            {topUpBusy ? "Starting…" : "Add $10 credit"}
-          </Button>
+          <h2 className="mb-4 text-lg font-semibold text-fg">Billing</h2>
+          <BillingPanel externalUserId={user.id} />
         </section>
 
         <section id="keys">

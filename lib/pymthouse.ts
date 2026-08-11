@@ -1,6 +1,14 @@
 import "server-only";
 
-import { PmtHouseClient, PmtHouseError } from "@pymthouse/builder-sdk";
+import {
+  PmtHouseClient,
+  PmtHouseError,
+  type AppUserInvoice,
+  type AppUserInvoiceHostedUrlResult,
+  type AppUserPaymentMethod,
+  type BillingState,
+  type UsageBalanceResponse,
+} from "@pymthouse/builder-sdk";
 
 function readPymthouseM2mConfig() {
   const issuerUrl = process.env.PYMTHOUSE_ISSUER_URL?.trim();
@@ -45,7 +53,7 @@ export function createPmtHouseClient(): PmtHouseClient {
   });
 }
 
-export function appsOrigin(): string {
+function appsOrigin(): string {
   const issuer = process.env.PYMTHOUSE_ISSUER_URL?.trim();
   if (!issuer) {
     throw new PmtHouseError("PYMTHOUSE_ISSUER_URL is required", {
@@ -56,7 +64,7 @@ export function appsOrigin(): string {
   return issuer.replace(/\/api\/v1\/oidc\/?$/i, "");
 }
 
-export function m2mAuthHeader(): string {
+function m2mAuthHeader(): string {
   const id = process.env.PYMTHOUSE_M2M_CLIENT_ID?.trim();
   const secret = process.env.PYMTHOUSE_M2M_CLIENT_SECRET?.trim();
   if (!id || !secret) {
@@ -66,6 +74,10 @@ export function m2mAuthHeader(): string {
     });
   }
   return `Basic ${Buffer.from(`${id}:${secret}`).toString("base64")}`;
+}
+
+function appUrl(): string {
+  return process.env.NEXT_PUBLIC_APP_URL?.trim() || "http://localhost:3000";
 }
 
 export function isUserNotFoundError(error: unknown): boolean {
@@ -90,58 +102,27 @@ export async function ensureAppUserProvisioned(
     });
   } catch (error) {
     if (error instanceof PmtHouseError && error.status === 409) return;
-    // Fallback to raw POST for environments that only accept that shape.
-    const clientId = readPublicClientId();
-    const response = await fetch(`${appsOrigin()}/api/v1/apps/${clientId}/users`, {
-      method: "POST",
-      headers: {
-        Authorization: m2mAuthHeader(),
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        externalUserId,
-        ...(email?.trim() ? { email: email.trim() } : {}),
-        status: "active",
-      }),
-    });
-    if (response.ok || response.status === 409) return;
-    const text = await response.text().catch(() => "");
-    throw new PmtHouseError(text || "Failed to provision user", {
-      status: response.status,
-      code: "provision_failed",
-    });
-  }
-}
-
-export async function mintEndUserAccessToken(externalUserId: string): Promise<string> {
-  const client = createPmtHouseClient();
-  try {
-    const minted = await client.mintUserAccessToken({ externalUserId });
-    return minted.access_token;
-  } catch (error) {
-    if (isUserNotFoundError(error)) {
-      await ensureAppUserProvisioned(externalUserId);
-      const minted = await client.mintUserAccessToken({ externalUserId });
-      return minted.access_token;
-    }
     throw error;
   }
 }
 
 export async function createUserApiKey(externalUserId: string, label?: string) {
   await ensureAppUserProvisioned(externalUserId);
+  // Key mint is not wrapped by builder-sdk yet — one M2M POST.
   const clientId = readPublicClientId();
-  const url = `${appsOrigin()}/api/v1/apps/${encodeURIComponent(clientId)}/users/${encodeURIComponent(externalUserId)}/keys`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: m2mAuthHeader(),
-      Accept: "application/json",
-      "Content-Type": "application/json",
+  const response = await fetch(
+    `${appsOrigin()}/api/v1/apps/${encodeURIComponent(clientId)}/users/${encodeURIComponent(externalUserId)}/keys`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: m2mAuthHeader(),
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(label ? { label } : {}),
+      cache: "no-store",
     },
-    body: JSON.stringify(label ? { label } : {}),
-    cache: "no-store",
-  });
+  );
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     throw new PmtHouseError(text || "API key create failed", {
@@ -156,11 +137,65 @@ export async function createUserApiKey(externalUserId: string, label?: string) {
   };
 }
 
+/** SDK: balance + billing posture for Settings / studio. */
+export async function getBillingSnapshot(externalUserId: string): Promise<{
+  balance: UsageBalanceResponse;
+  billingState: BillingState;
+}> {
+  const client = createPmtHouseClient();
+  await ensureAppUserProvisioned(externalUserId);
+  const [balance, billingState] = await Promise.all([
+    client.getUsageBalance(externalUserId),
+    client.getBillingState(externalUserId),
+  ]);
+  return { balance, billingState };
+}
+
+/** SDK: end-user invoices (decimal dollars, not micros). */
+export async function listUserInvoices(
+  externalUserId: string,
+  opts?: { page?: number; pageSize?: number },
+) {
+  const client = createPmtHouseClient();
+  return client.listUserInvoices(externalUserId, opts);
+}
+
+export async function getUserInvoiceHostedUrl(
+  externalUserId: string,
+  invoiceId: string,
+): Promise<AppUserInvoiceHostedUrlResult> {
+  const client = createPmtHouseClient();
+  return client.getUserInvoiceHostedUrl(externalUserId, invoiceId);
+}
+
+/** SDK: end-user payment methods. */
+export async function listUserPaymentMethods(
+  externalUserId: string,
+): Promise<AppUserPaymentMethod[]> {
+  const client = createPmtHouseClient();
+  const result = await client.listUserPaymentMethods(externalUserId);
+  return result.paymentMethods ?? [];
+}
+
+export async function startPaymentMethodCheckout(externalUserId: string) {
+  const client = createPmtHouseClient();
+  return client.createUserPaymentMethodCheckout({
+    externalUserId,
+    successUrl: `${appUrl()}/app/settings?topup=pm-saved`,
+    cancelUrl: `${appUrl()}/app/settings?topup=canceled`,
+  });
+}
+
+export async function ensureDefaultPaymentMethod(externalUserId: string) {
+  const client = createPmtHouseClient();
+  return client.ensureUserDefaultPaymentMethod(externalUserId);
+}
+
+/**
+ * Prepaid top-up Checkout.
+ * Not yet on builder-sdk — M2M POST …/billing/wallet/top-up (same as dashboard).
+ */
 export async function startWalletTopUp(externalUserId: string, amountUsd: number) {
-  // Builder API: POST /api/v1/apps/{clientId}/billing/wallet/top-up (M2M Basic).
-  // There is no /api/v1/user/billing/wallet/* route — that 404s as HTML on the
-  // pymthouse Next app. Pass externalUserId for merchant end-user checkout.
-  const origin = process.env.NEXT_PUBLIC_APP_URL?.trim() || "http://localhost:3000";
   const clientId = readPublicClientId();
   const response = await fetch(
     `${appsOrigin()}/api/v1/apps/${encodeURIComponent(clientId)}/billing/wallet/top-up`,
@@ -174,8 +209,8 @@ export async function startWalletTopUp(externalUserId: string, amountUsd: number
       body: JSON.stringify({
         amountUsd: amountUsd.toFixed(2),
         externalUserId,
-        successUrl: `${origin}/app/settings?topup=success`,
-        cancelUrl: `${origin}/app/settings?topup=cancel`,
+        successUrl: `${appUrl()}/app/settings?topup=succeeded`,
+        cancelUrl: `${appUrl()}/app/settings?topup=canceled`,
       }),
       cache: "no-store",
     },
@@ -187,7 +222,8 @@ export async function startWalletTopUp(externalUserId: string, amountUsd: number
       code: "top_up_failed",
     });
   }
-  return (await response.json()) as { url?: string; checkoutUrl?: string };
+  return (await response.json()) as { checkoutUrl?: string; url?: string };
 }
 
+export type { AppUserInvoice, AppUserPaymentMethod, BillingState, UsageBalanceResponse };
 export { PmtHouseError };
