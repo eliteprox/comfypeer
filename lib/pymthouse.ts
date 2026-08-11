@@ -157,21 +157,29 @@ export async function createUserApiKey(externalUserId: string, label?: string) {
 }
 
 export async function startWalletTopUp(externalUserId: string, amountUsd: number) {
+  // Builder API: POST /api/v1/apps/{clientId}/billing/wallet/top-up (M2M Basic).
+  // There is no /api/v1/user/billing/wallet/* route — that 404s as HTML on the
+  // pymthouse Next app. Pass externalUserId for merchant end-user checkout.
   const origin = process.env.NEXT_PUBLIC_APP_URL?.trim() || "http://localhost:3000";
-  const response = await fetch(`${appsOrigin()}/api/v1/user/billing/wallet/top-up`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${await mintEndUserAccessToken(externalUserId)}`,
-      Accept: "application/json",
-      "Content-Type": "application/json",
+  const clientId = readPublicClientId();
+  const response = await fetch(
+    `${appsOrigin()}/api/v1/apps/${encodeURIComponent(clientId)}/billing/wallet/top-up`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: m2mAuthHeader(),
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        amountUsd: amountUsd.toFixed(2),
+        externalUserId,
+        successUrl: `${origin}/app/settings?topup=success`,
+        cancelUrl: `${origin}/app/settings?topup=cancel`,
+      }),
+      cache: "no-store",
     },
-    body: JSON.stringify({
-      amountUsd,
-      successUrl: `${origin}/app/settings?topup=success`,
-      cancelUrl: `${origin}/app/settings?topup=cancel`,
-    }),
-    cache: "no-store",
-  });
+  );
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     throw new PmtHouseError(text || "Top-up failed", {

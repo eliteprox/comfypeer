@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     }
     const result = await startWalletTopUp(body.externalUserId.trim(), amount);
     return NextResponse.json({
-      url: result.url || result.checkoutUrl || null,
+      url: result.checkoutUrl || result.url || null,
     });
   } catch (error) {
     if (error instanceof PmtHouseError) {
