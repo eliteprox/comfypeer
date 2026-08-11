@@ -8,9 +8,9 @@ export const metadata: Metadata = {
 const MCP_URL =
   process.env.NEXT_PUBLIC_PYMTHOUSE_MCP_URL ?? "https://staging.pymthouse.com/api/v1/mcp";
 
-const SNIPPET = `# Agent self-registration (Ed25519) — requires PymtHouse #382
-# 1. GET /api/v1/network/register/challenge
-# 2. Sign challenge with your Ed25519 private key
+const SNIPPET = `# Agent self-registration (Ed25519)
+# 1. GET /api/v1/network/register/challenge?publicKey=<hex>
+# 2. Sign the returned nonce with your Ed25519 private key
 # 3. POST /api/v1/network/register → one-time app_*_* key
 # 4. Bearer that key against MCP:
 
@@ -18,18 +18,18 @@ curl -s ${MCP_URL} \\
   -H "Authorization: Bearer app_<id>_<secret>" \\
   -H "Content-Type: application/json"
 
-# Tools: list_workflows · run_workflow · start_stream
-#         update_stream · get_stream · stop_stream
-# start_stream requires max_duration_s + max_spend_usd`;
+# Tools: livepeer_mcp_info · list_capabilities · list_discovery_profiles
+#         query_orchestrators · get_discovery_freshness · create_signer_session
+# create_signer_session returns an SDK token for local execution`;
 
 export default function AgentsPage() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
       <h1 className="text-2xl font-semibold tracking-tight text-fg">Agents</h1>
       <p className="mt-2 max-w-2xl text-muted">
-        Paste the MCP URL into your client. Your agent registers itself, prepays, and drives
-        workflows — including <span className="font-mono text-fg">update_stream</span> on a live
-        session.
+        Paste the MCP URL into your client. Your agent registers itself, prepays, discovers
+        orchestrators, and mints its own signer session with{" "}
+        <span className="font-mono text-fg">create_signer_session</span> — no human in the loop.
       </p>
 
       <div className="mt-6 rounded-lg border border-billing-warn/40 bg-elevated p-4">
@@ -44,7 +44,7 @@ export default function AgentsPage() {
         <div className="mt-1.5 flex flex-wrap items-center gap-3 rounded-md border border-border bg-surface px-3 py-2">
           <code className="flex-1 break-all font-mono text-sm text-live">{MCP_URL}</code>
           <Button href="/pricing" variant="secondary" className="shrink-0">
-            Prepay $10
+            View pricing
           </Button>
         </div>
       </div>
@@ -54,10 +54,11 @@ export default function AgentsPage() {
       </pre>
 
       <p className="mt-6 text-sm text-muted">
-        Ship narrative: an agent watches a stream, describes what it sees (
-        <span className="font-mono">analyze</span>), and restyles it via{" "}
-        <span className="font-mono">update_stream</span> — no human in the loop. Manifest:{" "}
-        <span className="font-mono text-fg">comfypeer-mcp</span> (coming with beat two).
+        The hosted MCP covers discovery and session minting. Execution — running a capability,
+        starting a stream, calling a live runner — happens in the local client:{" "}
+        <span className="font-mono text-fg">livepeer-python-gateway/examples/comfypeer-mcp</span>,
+        driven with the SDK token from{" "}
+        <span className="font-mono">create_signer_session</span>.
       </p>
     </div>
   );
