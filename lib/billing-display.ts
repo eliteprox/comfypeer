@@ -49,7 +49,14 @@ export function spendPostureBadge(status: BillingStatus): {
   }
 }
 
-/** Included remaining + prepaid − unbilled debt. */
+/**
+ * Signed runway for the Available figure.
+ *
+ * While prepaid/included remain, runway is spendable — gathering invoice
+ * totals can still list prepaid-covered usage under credit_then_invoice and
+ * must not be subtracted again. Once spendable is exhausted, runway is the
+ * negative of unbilled overage debt.
+ */
 export function availableRunway(state: BillingState): {
   usd: string;
   tone: SpendPostureTone;
@@ -57,8 +64,9 @@ export function availableRunway(state: BillingState): {
 } {
   const included = parseUsdMicros(state.funding.included.usdMicros);
   const prepaid = parseUsdMicros(state.funding.prepaid.usdMicros);
+  const spendable = parseUsdMicros(state.funding.spendable.usdMicros);
   const debt = parseUsdMicros(state.funding.overage.unbilledDebt?.usdMicros);
-  const available = included + prepaid - debt;
+  const available = spendable > BigInt(0) ? spendable : -debt;
 
   let tone: SpendPostureTone = "ok";
   if (available < BigInt(0)) {

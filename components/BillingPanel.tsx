@@ -23,6 +23,20 @@ type Invoice = {
   invoiceType?: string;
 };
 
+type LedgerEntry = {
+  id: string;
+  date: string;
+  type: "credit_purchased" | "usage" | "invoice" | "refund";
+  description: string;
+  amountUsdMicros: string;
+  creditDeltaUsdMicros: string;
+  balanceUsdMicros: string | null;
+  derived: boolean;
+  status?: string | null;
+  invoiceId?: string | null;
+  hostedInvoiceUrl?: string | null;
+};
+
 type PaymentMethod = {
   id: string;
   brand: string | null;
@@ -69,18 +83,22 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
   const [balance, setBalance] = useState<Balance | null>(null);
   const [billingState, setBillingState] = useState<BillingState | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [ledger, setLedger] = useState<LedgerEntry[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [amountUsd, setAmountUsd] = useState(10);
-  const [busy, setBusy] = useState<"topup" | "pm" | string | null>(null);
+  const [busy, setBusy] = useState<"topup" | "pm" | "test-usage" | string | null>(
+    null,
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     const qs = `externalUserId=${encodeURIComponent(externalUserId)}`;
     try {
-      const [walletRes, invRes, pmRes] = await Promise.all([
+      const [walletRes, invRes, txRes, pmRes] = await Promise.all([
         fetch(`/api/pymthouse/wallet?${qs}`),
         fetch(`/api/pymthouse/wallet/invoices?${qs}&pageSize=20`),
+        fetch(`/api/pymthouse/wallet/transactions?${qs}`),
         fetch(`/api/pymthouse/wallet/payment-methods?${qs}`),
       ]);
       if (!walletRes.ok) {
@@ -99,6 +117,13 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
         setInvoices(inv.items ?? []);
       } else {
         setInvoices([]);
+      }
+
+      if (txRes.ok) {
+        const tx = (await txRes.json()) as { items?: LedgerEntry[] };
+        setLedger(tx.items ?? []);
+      } else {
+        setLedger([]);
       }
 
       if (pmRes.ok) {
@@ -151,6 +176,42 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
       redirectToCheckout(data.url);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Top-up failed");
+      setBusy(null);
+    }
+  }
+
+  async function onTestUsage() {
+    setBusy("test-usage");
+    setError(null);
+    setFlash(null);
+    try {
+      const res = await fetch("/api/pymthouse/wallet/test-usage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          externalUserId,
+          amountUsd,
+          collect: true,
+        }),
+      });
+      const data = (await res.json()) as {
+        error?: string;
+        requestId?: string;
+        amountUsd?: string;
+        collect?: { outcome?: string; invoiceIds?: string[] };
+      };
+      if (!res.ok) throw new Error(data.error || "Test usage failed");
+      const invoiceIds = data.collect?.invoiceIds ?? [];
+      const outcome = data.collect?.outcome ?? "skipped";
+      setFlash(
+        invoiceIds.length > 0
+          ? `Test usage $${data.amountUsd ?? amountUsd.toFixed(2)} ingested (${data.requestId}). Invoice ${outcome}: ${invoiceIds.join(", ")}`
+          : `Test usage $${data.amountUsd ?? amountUsd.toFixed(2)} ingested (${data.requestId}). Collect outcome: ${outcome}`,
+      );
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Test usage failed");
+    } finally {
       setBusy(null);
     }
   }
@@ -302,11 +363,26 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
           <Button
             type="button"
             onClick={() => void onTopUp()}
-            disabled={busy === "topup"}
+            disabled={busy === "topup" || busy === "test-usage"}
           >
             {busy === "topup" ? "Starting…" : `Add $${amountUsd} credit`}
           </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => void onTestUsage()}
+            disabled={busy === "topup" || busy === "test-usage"}
+          >
+            {busy === "test-usage"
+              ? "Sending usage…"
+              : `Test usage $${amountUsd}`}
+          </Button>
         </div>
+        <p className="mt-2 text-xs text-faint">
+          Test usage posts a CloudEvent into OpenMeter (same meter as Kafka
+          ingest), then forces collection so you can follow Custom Invoicing →
+          settlement → Stripe Connect.
+        </p>
       </section>
 
       <section>
@@ -334,8 +410,53 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
 
       <section>
         <h3 className="text-base font-semibold text-fg">Billing history</h3>
-        {invoices.length === 0 ? (
-          <p className="mt-2 text-sm text-muted">No invoices yet.</p>
+        <p className="mt-1 text-xs text-faint">
+          Credits added, usage that drew them down, and invoices.
+        </p>
+        {ledger.length === 0 && invoices.length === 0 ? (
+          <p className="mt-2 text-sm text-muted">No billing activity yet.</p>
+        ) : ledger.length > 0 ? (
+          <ul className="mt-3 divide-y divide-border rounded-lg border border-border">
+            {ledger.slice(0, 20).map((entry) => {
+              const amountUsd = Number(BigInt(entry.amountUsdMicros || "0")) / 1_000_000;
+              const delta = Number(BigInt(entry.creditDeltaUsdMicros || "0")) / 1_000_000;
+              const label =
+                entry.type === "credit_purchased"
+                  ? "Credit"
+                  : entry.type === "usage"
+                    ? "Usage"
+                    : entry.type === "refund"
+                      ? "Refund"
+                      : "Invoice";
+              const signed =
+                entry.type === "usage" || delta < 0
+                  ? `-$${Math.abs(amountUsd).toFixed(2)}`
+                  : `$${amountUsd.toFixed(2)}`;
+              return (
+                <li
+                  key={entry.id}
+                  className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm"
+                >
+                  <div className="min-w-0">
+                    <p className="text-xs text-fg">{entry.description}</p>
+                    <p className="text-xs text-faint">
+                      {formatInvoiceDate(entry.date)} · {label}
+                      {entry.derived ? " · metered" : ""}
+                    </p>
+                  </div>
+                  <span
+                    className={`font-mono tabular-nums ${
+                      entry.type === "usage" || delta < 0
+                        ? "text-muted"
+                        : "text-fg"
+                    }`}
+                  >
+                    {signed}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
         ) : (
           <ul className="mt-3 divide-y divide-border rounded-lg border border-border">
             {invoices.map((inv) => (

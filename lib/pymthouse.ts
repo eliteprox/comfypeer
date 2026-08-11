@@ -225,5 +225,101 @@ export async function startWalletTopUp(externalUserId: string, amountUsd: number
   return (await response.json()) as { checkoutUrl?: string; url?: string };
 }
 
+export type WalletLedgerEntry = {
+  id: string;
+  date: string;
+  type: "credit_purchased" | "usage" | "invoice" | "refund";
+  description: string;
+  amountUsdMicros: string;
+  creditDeltaUsdMicros: string;
+  balanceUsdMicros: string | null;
+  derived: boolean;
+  status?: string | null;
+  invoiceId?: string | null;
+  hostedInvoiceUrl?: string | null;
+};
+
+/**
+ * Prepaid wallet ledger (credits + usage drawdowns + invoices).
+ * M2M GET …/billing/wallet/transactions
+ */
+export async function listWalletTransactions(
+  externalUserId: string,
+): Promise<{ items: WalletLedgerEntry[]; degraded: boolean }> {
+  const clientId = readPublicClientId();
+  const url = new URL(
+    `${appsOrigin()}/api/v1/apps/${encodeURIComponent(clientId)}/billing/wallet/transactions`,
+  );
+  url.searchParams.set("externalUserId", externalUserId);
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      Authorization: m2mAuthHeader(),
+      Accept: "application/json",
+    },
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new PmtHouseError(text || "Failed to load billing history", {
+      status: response.status,
+      code: "wallet_transactions_failed",
+    });
+  }
+  return (await response.json()) as {
+    items: WalletLedgerEntry[];
+    degraded: boolean;
+  };
+}
+
+export type TestUsageEventResult = {
+  requestId: string;
+  amountUsd: string;
+  amountUsdMicros: string;
+  subject: string;
+  collected: boolean;
+  collect?: {
+    outcome: string;
+    invoiceIds: string[];
+  };
+};
+
+/**
+ * Demo: ingest a usage CloudEvent and optionally force invoice collection.
+ * M2M POST …/billing/wallet/test-usage
+ */
+export async function ingestTestUsageEvent(
+  externalUserId: string,
+  amountUsd: number,
+  opts?: { collect?: boolean },
+): Promise<TestUsageEventResult> {
+  const clientId = readPublicClientId();
+  const response = await fetch(
+    `${appsOrigin()}/api/v1/apps/${encodeURIComponent(clientId)}/billing/wallet/test-usage`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: m2mAuthHeader(),
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        externalUserId,
+        amountUsd: amountUsd.toFixed(2),
+        collect: opts?.collect !== false,
+      }),
+      cache: "no-store",
+    },
+  );
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new PmtHouseError(text || "Test usage ingest failed", {
+      status: response.status,
+      code: "test_usage_failed",
+    });
+  }
+  return (await response.json()) as TestUsageEventResult;
+}
+
 export type { AppUserInvoice, AppUserPaymentMethod, BillingState, UsageBalanceResponse };
 export { PmtHouseError };
