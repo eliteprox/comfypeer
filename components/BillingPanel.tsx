@@ -191,7 +191,19 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
       if (!res.ok) throw new Error(data.error || "Could not open invoice");
       const url = data.hostedInvoiceUrl || data.invoicePdf;
       if (!url) throw new Error("No hosted invoice URL");
-      window.open(url, "_blank", "noopener,noreferrer");
+      let parsed: URL;
+      try {
+        parsed = new URL(url);
+      } catch {
+        throw new Error("Invalid invoice URL");
+      }
+      const allowed =
+        parsed.protocol === "https:" &&
+        (parsed.hostname === "invoice.stripe.com" ||
+          parsed.hostname.endsWith(".stripe.com") ||
+          parsed.hostname === "pay.stripe.com");
+      if (!allowed) throw new Error("Invoice URL host is not allowed");
+      window.open(parsed.toString(), "_blank", "noopener,noreferrer");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not open invoice");
     } finally {
