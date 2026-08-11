@@ -80,7 +80,7 @@ export default function HomePage() {
             },
             {
               icon: GitBranch,
-              title: "Run on Livepeer BYOC",
+              title: "Run on a Livepeer live runner",
               body: "A dedicated worker holds your stream (capacity 1). Prompt updates apply mid-flight.",
             },
             {

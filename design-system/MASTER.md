@@ -8,7 +8,7 @@
 
 **Project:** ComfyPeer  
 **Generated:** 2026-08-11  
-**Category:** Real-time AI video (ComfyStream) on Livepeer BYOC · metered by PymtHouse  
+**Category:** Real-time AI video (ComfyStream) on Livepeer live runners · metered by PymtHouse  
 **Mode:** Dark-only (OLED). No light theme for v1.
 
 ---
@@ -17,7 +17,7 @@
 
 - ComfyPeer is **real-time video** (webcam/stream → Comfy img2img → live output), not batch image generation.
 - Billing unit is **seconds of stream time** (`billable_secs`), not GPU-hours.
-- "Bring your graph" is **bounded** by nodes/models/engines baked into the BYOC image.
+- "Bring your graph" is **bounded** by nodes/models/engines baked into the live-runner image.
 - Resolution UI is a **picklist** (512² / 384×704 / 704×384), not freeform.
 - Marketing voice: calm, precise, slightly dry. Numbers over hype. No crypto vocabulary on marketing surfaces.
 - Logomark: **two-node graph with connecting edge** — reads as link at 16px, workflow at 512px.

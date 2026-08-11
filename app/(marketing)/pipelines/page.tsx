@@ -20,7 +20,7 @@ export default function PipelinesPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-fg">Pipelines</h1>
           <p className="mt-2 max-w-2xl text-muted">
-            Curated nodes, models, and resolution presets baked into the BYOC image — not a
+            Curated nodes, models, and resolution presets baked into the live-runner image — not a
             hand-wavy &quot;any ComfyUI workflow&quot; promise.
           </p>
         </div>

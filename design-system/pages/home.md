@@ -29,7 +29,7 @@ Do **not** put plan stats, channel logos, or feature grids in the first viewport
 ## Below fold (one job per section)
 
 1. **Latency specs** — TTFF + steady-state FPS per featured pipeline (not price)
-2. **How it works** — graph → Livepeer BYOC → billable seconds (3 steps max)
+2. **How it works** — graph → Livepeer live runner → billable seconds (3 steps max)
 3. **Bounded portability** — same Comfy graph, curated node/model list link to `/pipelines`
 4. **Final CTA**
 

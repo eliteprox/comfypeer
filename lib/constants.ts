@@ -20,7 +20,7 @@ export const RESOLUTION_PRESETS = [
   { id: "landscape", label: "Landscape", width: 704, height: 384 },
 ] as const;
 
-/** Curated pipelines baked into the BYOC image — honesty over completeness. */
+/** Curated pipelines baked into the live-runner image — honesty over completeness. */
 export const PIPELINES = [
   {
     id: "streamdiffusion-img2img",
