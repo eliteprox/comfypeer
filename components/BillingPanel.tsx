@@ -5,10 +5,12 @@ import type { BillingState } from "@pymthouse/builder-sdk";
 import { Button } from "@/components/Button";
 import {
   availableRunway,
+  currentBillingPeriodLabel,
   formatInvoiceAmount,
   formatInvoiceDate,
-  formatWalletUsd,
+  formatSignedWalletUsd,
   spendPostureBadge,
+  sumLedgerUsageUsdMicros,
   type SpendPostureTone,
 } from "@/lib/billing-display";
 import {
@@ -51,12 +53,6 @@ type PaymentMethod = {
   isDefault: boolean;
 };
 
-type Balance = {
-  balanceUsdMicros: string;
-  consumedUsdMicros: string;
-  lifetimeGrantedUsdMicros: string;
-};
-
 const QUICK_AMOUNTS = [1, 10, 25, 100] as const;
 
 const POSTURE_CLASS: Record<SpendPostureTone, string> = {
@@ -87,7 +83,6 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
-  const [balance, setBalance] = useState<Balance | null>(null);
   const [billingState, setBillingState] = useState<BillingState | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [ledger, setLedger] = useState<LedgerEntry[]>([]);
@@ -113,10 +108,8 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
         throw new Error(body.error || "Failed to load billing");
       }
       const wallet = (await walletRes.json()) as {
-        balance: Balance;
         billingState: BillingState;
       };
-      setBalance(wallet.balance);
       setBillingState(wallet.billingState);
 
       if (invRes.ok) {
@@ -353,13 +346,13 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
               </div>
               <div>
                 <p className="font-mono text-[10px] uppercase tracking-wide text-faint">
-                  Lifetime granted
+                  This period
                 </p>
                 <p className="mt-1 font-mono text-3xl tabular-nums text-fg">
-                  ${formatWalletUsd(balance?.lifetimeGrantedUsdMicros)}
+                  {formatSignedWalletUsd(sumLedgerUsageUsdMicros(ledger))}
                 </p>
                 <p className="mt-1 text-xs text-muted">
-                  Consumed ${formatWalletUsd(balance?.consumedUsdMicros)}
+                  {currentBillingPeriodLabel()}
                 </p>
               </div>
             </div>

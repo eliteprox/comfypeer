@@ -92,6 +92,27 @@ export function availableRunway(state: BillingState): {
   };
 }
 
+/** UTC calendar month label — same window as PymtHouse wallet usage. */
+export function currentBillingPeriodLabel(now: Date = new Date()): string {
+  return now.toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/** Gross metered spend from prepaid-ledger usage rows (current cycle). */
+export function sumLedgerUsageUsdMicros(
+  entries: ReadonlyArray<{ type: string; amountUsdMicros: string }>,
+): bigint {
+  let total = BigInt(0);
+  for (const entry of entries) {
+    if (entry.type !== "usage") continue;
+    total += parseUsdMicros(entry.amountUsdMicros);
+  }
+  return total;
+}
+
 export function formatInvoiceDate(iso: string | undefined): string {
   if (!iso) return "—";
   const date = new Date(iso);
