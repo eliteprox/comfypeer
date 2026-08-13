@@ -11,6 +11,13 @@ import {
   spendPostureBadge,
   type SpendPostureTone,
 } from "@/lib/billing-display";
+import {
+  formatTopUpUsdLabel,
+  parseTopUpAmountUsd,
+  sanitizeTopUpAmountInput,
+  TOP_UP_MAX_USD,
+  TOP_UP_MIN_USD,
+} from "@/lib/top-up-amount";
 
 type Invoice = {
   id: string;
@@ -50,7 +57,7 @@ type Balance = {
   lifetimeGrantedUsdMicros: string;
 };
 
-const QUICK_AMOUNTS = [10, 25, 100] as const;
+const QUICK_AMOUNTS = [1, 10, 25, 100] as const;
 
 const POSTURE_CLASS: Record<SpendPostureTone, string> = {
   ok: "border-live/40 text-live",
@@ -85,7 +92,7 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [ledger, setLedger] = useState<LedgerEntry[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
-  const [amountUsd, setAmountUsd] = useState(10);
+  const [amountInput, setAmountInput] = useState("10");
   const [busy, setBusy] = useState<"topup" | "pm" | "test-usage" | string | null>(
     null,
   );
@@ -162,13 +169,18 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
   }, [externalUserId, load]);
 
   async function onTopUp() {
+    const parsed = parseTopUpAmountUsd(amountInput);
+    if (!parsed.ok) {
+      setError(parsed.error);
+      return;
+    }
     setBusy("topup");
     setError(null);
     try {
       const res = await fetch("/api/pymthouse/top-up", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ externalUserId, amountUsd }),
+        body: JSON.stringify({ externalUserId, amountUsd: parsed.amount }),
       });
       const data = (await res.json()) as { url?: string; error?: string };
       if (!res.ok) throw new Error(data.error || "Top-up failed");
@@ -181,6 +193,11 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
   }
 
   async function onTestUsage() {
+    const parsed = parseTopUpAmountUsd(amountInput);
+    if (!parsed.ok) {
+      setError(parsed.error);
+      return;
+    }
     setBusy("test-usage");
     setError(null);
     setFlash(null);
@@ -190,7 +207,7 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           externalUserId,
-          amountUsd,
+          amountUsd: parsed.amount,
           collect: true,
         }),
       });
@@ -203,10 +220,11 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
       if (!res.ok) throw new Error(data.error || "Test usage failed");
       const invoiceIds = data.collect?.invoiceIds ?? [];
       const outcome = data.collect?.outcome ?? "skipped";
+      const fallback = parsed.amount.toFixed(2);
       setFlash(
         invoiceIds.length > 0
-          ? `Test usage $${data.amountUsd ?? amountUsd.toFixed(2)} ingested (${data.requestId}). Invoice ${outcome}: ${invoiceIds.join(", ")}`
-          : `Test usage $${data.amountUsd ?? amountUsd.toFixed(2)} ingested (${data.requestId}). Collect outcome: ${outcome}`,
+          ? `Test usage $${data.amountUsd ?? fallback} ingested (${data.requestId}). Invoice ${outcome}: ${invoiceIds.join(", ")}`
+          : `Test usage $${data.amountUsd ?? fallback} ingested (${data.requestId}). Collect outcome: ${outcome}`,
       );
       await load();
     } catch (e) {
@@ -285,6 +303,13 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
   const runway = billingState ? availableRunway(billingState) : null;
   const defaultPm =
     paymentMethods.find((pm) => pm.isDefault) ?? paymentMethods[0] ?? null;
+  const parsedAmount = parseTopUpAmountUsd(amountInput);
+  const amountLabel = parsedAmount.ok
+    ? formatTopUpUsdLabel(parsedAmount.amount)
+    : amountInput.trim() || "…";
+  const amountInvalid = amountInput.trim() !== "" && !parsedAmount.ok;
+  const amountDisabled =
+    busy === "topup" || busy === "test-usage" || !parsedAmount.ok;
 
   return (
     <div className="space-y-6">
@@ -343,15 +368,15 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
           <p className="text-sm text-muted">Billing state unavailable.</p>
         )}
 
-        <div className="mt-5 flex flex-wrap items-end gap-3 border-t border-border pt-4">
-          <div className="flex gap-2">
+        <div className="mt-5 space-y-3 border-t border-border pt-4">
+          <div className="flex flex-wrap items-end gap-2">
             {QUICK_AMOUNTS.map((n) => (
               <button
                 key={n}
                 type="button"
-                onClick={() => setAmountUsd(n)}
+                onClick={() => setAmountInput(String(n))}
                 className={`rounded-md border px-3 py-1.5 font-mono text-xs tabular-nums ${
-                  amountUsd === n
+                  parsedAmount.ok && parsedAmount.amount === n
                     ? "border-live bg-live-dim text-live"
                     : "border-border text-muted hover:border-border-strong hover:text-fg"
                 }`}
@@ -359,29 +384,70 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
                 ${n}
               </button>
             ))}
+            <label htmlFor="topup-amount" className="relative inline-flex items-center">
+              <span className="sr-only">Custom amount in dollars</span>
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute left-2.5 font-mono text-xs text-muted"
+              >
+                $
+              </span>
+              <input
+                id="topup-amount"
+                inputMode="decimal"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="1.00"
+                aria-invalid={amountInvalid}
+                aria-describedby="topup-amount-hint"
+                value={amountInput}
+                onChange={(e) =>
+                  setAmountInput(sanitizeTopUpAmountInput(e.target.value))
+                }
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void onTopUp();
+                  }
+                }}
+                className={`h-7.5 w-28 rounded-md border bg-elevated py-1.5 pl-6 pr-2 font-mono text-xs tabular-nums text-fg outline-none placeholder:text-faint focus-visible:ring-1 focus-visible:ring-live/30 ${
+                  amountInvalid
+                    ? "border-billing-block"
+                    : parsedAmount.ok &&
+                        !QUICK_AMOUNTS.some((n) => n === parsedAmount.amount)
+                      ? "border-live bg-live-dim text-live"
+                      : "border-border"
+                }`}
+              />
+            </label>
           </div>
-          <Button
-            type="button"
-            onClick={() => void onTopUp()}
-            disabled={busy === "topup" || busy === "test-usage"}
-          >
-            {busy === "topup" ? "Starting…" : `Add $${amountUsd} credit`}
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => void onTestUsage()}
-            disabled={busy === "topup" || busy === "test-usage"}
-          >
-            {busy === "test-usage"
-              ? "Sending usage…"
-              : `Test usage $${amountUsd}`}
-          </Button>
+          <div className="flex flex-wrap gap-3">
+            <Button
+              type="button"
+              onClick={() => void onTopUp()}
+              disabled={amountDisabled}
+            >
+              {busy === "topup" ? "Starting…" : `Add $${amountLabel} credit`}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void onTestUsage()}
+              disabled={amountDisabled}
+            >
+              {busy === "test-usage"
+                ? "Sending usage…"
+                : `Test usage $${amountLabel}`}
+            </Button>
+          </div>
         </div>
-        <p className="mt-2 text-xs text-faint">
-          Test usage posts a CloudEvent into OpenMeter (same meter as Kafka
-          ingest), then forces collection so you can follow Custom Invoicing →
-          settlement → Stripe Connect.
+        <p
+          id="topup-amount-hint"
+          className={`mt-2 text-xs ${amountInvalid ? "text-billing-block" : "text-faint"}`}
+        >
+          {amountInvalid
+            ? `Enter $${TOP_UP_MIN_USD}–$${TOP_UP_MAX_USD.toLocaleString()} (up to 2 decimals).`
+            : `Min $${TOP_UP_MIN_USD} · max $${TOP_UP_MAX_USD.toLocaleString()}. Test usage posts a CloudEvent into OpenMeter (same meter as Kafka ingest), then forces collection so you can follow Custom Invoicing → settlement → Stripe Connect.`}
         </p>
       </section>
 

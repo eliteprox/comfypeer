@@ -1,8 +1,10 @@
 import "server-only";
 
 import {
+  loadAuthorizationServer,
   PmtHouseClient,
   PmtHouseError,
+  SIGN_JOB_SCOPE,
   type AppUserInvoice,
   type AppUserInvoiceHostedUrlResult,
   type AppUserPaymentMethod,
@@ -51,6 +53,129 @@ export function createPmtHouseClient(): PmtHouseClient {
     m2mClientSecret: config.m2mClientSecret,
     allowInsecureHttp: config.allowInsecureHttp,
   });
+}
+
+export type OwnerSignerSession = {
+  accessToken: string;
+  discoveryUrl: string;
+};
+
+function absoluteHttpUrl(raw: string, field: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new PmtHouseError(`${field} must be an absolute http(s) URL`, {
+      status: 502,
+      code: "missing_discovery_url",
+    });
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new PmtHouseError(`${field} must be an http(s) URL`, {
+      status: 502,
+      code: "missing_discovery_url",
+    });
+  }
+  return parsed;
+}
+
+function discoverOrchestratorsUrlFromSigner(signerUrl: string): string {
+  const parsed = absoluteHttpUrl(signerUrl, "signer_url");
+  parsed.search = "";
+  parsed.hash = "";
+  let basePath = parsed.pathname;
+  while (basePath.length > 1 && basePath.endsWith("/")) {
+    basePath = basePath.slice(0, -1);
+  }
+  if (basePath === "/") {
+    basePath = "";
+  }
+  parsed.pathname = `${basePath}/discover-orchestrators`;
+  return parsed.toString();
+}
+
+function discoveryUrlFromSignerSession(body: Record<string, unknown>): string {
+  const discovery =
+    typeof body.discovery_url === "string" ? body.discovery_url.trim() : "";
+  if (discovery) {
+    return absoluteHttpUrl(discovery, "discovery_url").toString();
+  }
+  const signer = typeof body.signer_url === "string" ? body.signer_url.trim() : "";
+  if (signer) {
+    return discoverOrchestratorsUrlFromSigner(signer);
+  }
+  throw new PmtHouseError("SignerSession did not suggest a discovery_url", {
+    status: 502,
+    code: "missing_discovery_url",
+  });
+}
+
+/**
+ * Mint an owner SignerSession via M2M `sign:job` and read the suggested
+ * remote-signer discovery URL (`discovery_url`, else `{signer_url}/discover-orchestrators`).
+ */
+export async function mintOwnerSignerSession(): Promise<OwnerSignerSession> {
+  const config = readPymthouseM2mConfig();
+  if (!config) {
+    throw new PmtHouseError(
+      "Pymthouse is not configured. Set PYMTHOUSE_ISSUER_URL, PYMTHOUSE_M2M_CLIENT_ID, and PYMTHOUSE_M2M_CLIENT_SECRET.",
+      { status: 503, code: "pymthouse_required" },
+    );
+  }
+
+  const as = await loadAuthorizationServer(config.issuerUrl, fetch, {
+    allowInsecureHttp: config.allowInsecureHttp,
+  });
+  const tokenEndpoint = as.token_endpoint;
+  if (!tokenEndpoint) {
+    throw new PmtHouseError("OIDC discovery document is missing token_endpoint", {
+      status: 500,
+      code: "oidc_discovery_invalid",
+    });
+  }
+
+  const response = await fetch(tokenEndpoint, {
+    method: "POST",
+    headers: {
+      Authorization: m2mAuthHeader(),
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
+    },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
+      scope: SIGN_JOB_SCOPE,
+    }).toString(),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new PmtHouseError(text || "SignerSession mint failed", {
+      status: response.status,
+      code: "signer_session_failed",
+    });
+  }
+
+  const parsed: unknown = await response.json();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new PmtHouseError("SignerSession mint returned invalid JSON", {
+      status: 502,
+      code: "invalid_token_response",
+    });
+  }
+  const body = parsed as Record<string, unknown>;
+  const accessToken =
+    typeof body.access_token === "string" ? body.access_token.trim() : "";
+  if (!accessToken) {
+    throw new PmtHouseError("SignerSession mint returned no access_token", {
+      status: 502,
+      code: "invalid_token_response",
+    });
+  }
+
+  return {
+    accessToken,
+    discoveryUrl: discoveryUrlFromSignerSession(body),
+  };
 }
 
 function appsOrigin(): string {

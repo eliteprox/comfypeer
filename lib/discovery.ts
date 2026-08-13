@@ -1,6 +1,6 @@
 import "server-only";
 
-import { getOrchestrators, type StagingOrch } from "@/lib/orchestrators";
+import { mintOwnerSignerSession, PmtHouseError } from "@/lib/pymthouse";
 
 export type LiveRunnerPriceInfo = {
   price: number;
@@ -24,8 +24,14 @@ export type LiveRunner = {
   };
 };
 
+export type Orchestrator = {
+  id: string;
+  url: string;
+  label: string;
+};
+
 export type OrchDiscovery = {
-  orch: StagingOrch;
+  orch: Orchestrator;
   runners: LiveRunner[];
   error?: string;
 };
@@ -35,8 +41,59 @@ type DiscoveryEntry = {
   runners?: LiveRunner[];
 };
 
-function discoveryUrl(orchUrl: string): string {
-  return `${orchUrl.replace(/\/$/, "")}/discovery`;
+const CACHE_TTL_MS = 30_000;
+
+let discoveryCache: { expiresAt: number; value: OrchDiscovery[] } | null = null;
+
+function labelFromOrchUrl(url: string, index: number): string {
+  try {
+    return new URL(url).hostname.replace(/\.daydream\.monster$/, "") || `orch-${index + 1}`;
+  } catch {
+    return `orch-${index + 1}`;
+  }
+}
+
+function discoveryFailure(message: string, url = ""): OrchDiscovery[] {
+  return [
+    {
+      orch: {
+        id: "discovery",
+        url,
+        label: "discovery",
+      },
+      runners: [],
+      error: message,
+    },
+  ];
+}
+
+function parseDiscoveryList(data: unknown): OrchDiscovery[] | { error: string } {
+  if (!Array.isArray(data)) {
+    return { error: "unexpected discovery shape" };
+  }
+  const out: OrchDiscovery[] = [];
+  let index = 0;
+  for (const entry of data as DiscoveryEntry[]) {
+    if (!entry || typeof entry !== "object") continue;
+    const url = typeof entry.address === "string" ? entry.address.trim() : "";
+    if (!url) continue;
+    const runners: LiveRunner[] = [];
+    for (const runner of entry.runners ?? []) {
+      if (runner && typeof runner.app === "string" && runner.app.trim()) {
+        runners.push(runner);
+      }
+    }
+    out.push({
+      orch: {
+        id: String(index + 1),
+        url,
+        label: labelFromOrchUrl(url, index),
+      },
+      runners,
+    });
+    index += 1;
+  }
+  return out;
 }
 
 export function parseRunnerMetadata(raw: string | undefined): Record<string, unknown> | null {
@@ -74,45 +131,51 @@ export function formatRunnerPrice(info: LiveRunnerPriceInfo | undefined): string
   return `${info.price} ${currency}/${unit}`;
 }
 
-export async function fetchLiveRunners(orchUrl: string): Promise<{
-  runners: LiveRunner[];
-  error?: string;
-}> {
-  const url = discoveryUrl(orchUrl);
+async function fetchDiscoveriesFromSignerSession(): Promise<OrchDiscovery[]> {
+  let discoveryUrl = "";
   try {
-    const res = await fetch(url, {
+    const session = await mintOwnerSignerSession();
+    discoveryUrl = session.discoveryUrl;
+    const res = await fetch(session.discoveryUrl, {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${session.accessToken}`,
+      },
       next: { revalidate: 30 },
-      headers: { Accept: "application/json" },
     });
     if (!res.ok) {
-      return { runners: [], error: `HTTP ${res.status}` };
+      return discoveryFailure(`HTTP ${res.status}`, session.discoveryUrl);
     }
-    const data: unknown = await res.json();
-    if (!Array.isArray(data)) {
-      return { runners: [], error: "unexpected discovery shape" };
+    const parsed = parseDiscoveryList(await res.json());
+    if (!Array.isArray(parsed)) {
+      return discoveryFailure(parsed.error, session.discoveryUrl);
     }
-    const runners: LiveRunner[] = [];
-    for (const entry of data as DiscoveryEntry[]) {
-      if (!entry || typeof entry !== "object") continue;
-      for (const runner of entry.runners ?? []) {
-        if (runner && typeof runner.app === "string" && runner.app.trim()) {
-          runners.push(runner);
-        }
-      }
-    }
-    return { runners };
+    return parsed;
   } catch (err) {
-    const message = err instanceof Error ? err.message : "discovery failed";
-    return { runners: [], error: message };
+    const message =
+      err instanceof PmtHouseError
+        ? err.message
+        : err instanceof Error
+          ? err.message
+          : "discovery failed";
+    return discoveryFailure(message, discoveryUrl);
   }
 }
 
 export async function fetchAllOrchDiscoveries(): Promise<OrchDiscovery[]> {
-  const orchs = getOrchestrators();
-  return Promise.all(
-    orchs.map(async (orch) => {
-      const { runners, error } = await fetchLiveRunners(orch.url);
-      return { orch, runners, error };
-    }),
-  );
+  if (discoveryCache && discoveryCache.expiresAt > Date.now()) {
+    return discoveryCache.value;
+  }
+  const value = await fetchDiscoveriesFromSignerSession();
+  discoveryCache = {
+    expiresAt: Date.now() + CACHE_TTL_MS,
+    value,
+  };
+  return value;
+}
+
+export async function getPrimaryOrchestrator(): Promise<Orchestrator | null> {
+  const discoveries = await fetchAllOrchDiscoveries();
+  const healthy = discoveries.find((d) => !d.error && d.orch.url);
+  return healthy?.orch ?? null;
 }

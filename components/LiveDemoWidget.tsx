@@ -260,7 +260,7 @@ export function LiveDemoWidget() {
         ) : null}
         <p className="mt-2 text-xs text-faint">
           Local preview demo — cost ticker uses StreamDiffusion retail rate. Production runs
-          land on staging orchestrators and meter via PymtHouse.
+          land on discovered orchestrators and meter via PymtHouse.
         </p>
       </div>
     </div>

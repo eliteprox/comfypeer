@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { PmtHouseError, startWalletTopUp } from "@/lib/pymthouse";
+import { parseTopUpAmountUsd } from "@/lib/top-up-amount";
 
 export const runtime = "nodejs";
 
@@ -12,11 +13,11 @@ export async function POST(request: Request) {
     if (!body.externalUserId?.trim()) {
       return NextResponse.json({ error: "externalUserId required" }, { status: 400 });
     }
-    const amount = Number(body.amountUsd ?? 10);
-    if (!Number.isFinite(amount) || amount < 1 || amount > 10000) {
-      return NextResponse.json({ error: "amountUsd must be 1–10000" }, { status: 400 });
+    const parsed = parseTopUpAmountUsd(body.amountUsd ?? 10);
+    if (!parsed.ok) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
-    const result = await startWalletTopUp(body.externalUserId.trim(), amount);
+    const result = await startWalletTopUp(body.externalUserId.trim(), parsed.amount);
     return NextResponse.json({
       url: result.checkoutUrl || result.url || null,
     });

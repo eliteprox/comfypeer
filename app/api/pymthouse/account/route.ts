@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
+import { getPrimaryOrchestrator } from "@/lib/discovery";
 import { getBillingSnapshot, PmtHouseError } from "@/lib/pymthouse";
-import { getPrimaryOrchestrator } from "@/lib/orchestrators";
 
 export const runtime = "nodejs";
 
@@ -12,7 +12,10 @@ export async function GET(request: Request) {
   }
 
   try {
-    const { balance, billingState } = await getBillingSnapshot(externalUserId);
+    const [{ balance, billingState }, orch] = await Promise.all([
+      getBillingSnapshot(externalUserId),
+      getPrimaryOrchestrator(),
+    ]);
     return NextResponse.json({
       balanceUsdMicros: balance.balanceUsdMicros,
       consumedUsdMicros: balance.consumedUsdMicros,
@@ -23,7 +26,7 @@ export async function GET(request: Request) {
         detail: billingState.explain.detail,
       },
       billingState,
-      orchestrator: getPrimaryOrchestrator().label,
+      orchestrator: orch?.label ?? null,
     });
   } catch (error) {
     if (error instanceof PmtHouseError) {

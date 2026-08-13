@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { getOrchestrators } from "@/lib/orchestrators";
 import {
   fetchAllOrchDiscoveries,
   formatRunnerPrice,
@@ -94,8 +93,8 @@ function RunnersTable({ discovery }: { discovery: OrchDiscovery }) {
 }
 
 export default async function NetworkPage() {
-  const orchs = getOrchestrators();
   const discoveries = await fetchAllOrchDiscoveries();
+  const orchs = discoveries.filter((d) => d.orch.url).map((d) => d.orch);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
@@ -108,19 +107,19 @@ export default async function NetworkPage() {
       <section className="mt-10 space-y-4 text-sm text-muted">
         <p>
           Live runners self-register with orchestrators (
-          <span className="font-mono text-fg">register_runner</span>) and advertise apps on{" "}
-          <span className="font-mono text-fg">GET /discovery</span>. ComfyStream appears as app{" "}
-          <span className="font-mono text-fg">comfystream</span> with capacity{" "}
+          <span className="font-mono text-fg">register_runner</span>) and advertise apps. ComfyStream
+          appears as app <span className="font-mono text-fg">comfystream</span> with capacity{" "}
           <span className="font-mono text-fg">1</span> (one stream per worker). Preferred time
           metric: <span className="font-mono text-fg">billable_secs</span>.
         </p>
         <p>
-          v1 prefers our staging orchestrators so demos are reliable. Third-party orchestrators
-          come after the image is stable and conformance-tested.
+          Orchestrators come from the remote signer&apos;s{" "}
+          <span className="font-mono text-fg">GET /discover-orchestrators</span> URL suggested on
+          the SignerSession exchange (<span className="font-mono text-fg">discovery_url</span>).
         </p>
       </section>
 
-      <h2 className="mt-10 text-base font-semibold text-fg">Staging orchestrators</h2>
+      <h2 className="mt-10 text-base font-semibold text-fg">Orchestrators</h2>
       <div className="mt-4 overflow-hidden rounded-lg border border-border">
         <table className="w-full text-left text-sm">
           <thead className="bg-surface text-xs uppercase tracking-wide text-faint">
@@ -131,22 +130,29 @@ export default async function NetworkPage() {
             </tr>
           </thead>
           <tbody>
-            {orchs.map((o) => (
-              <tr key={o.id} className="border-t border-border">
-                <td className="px-4 py-3 font-mono text-muted">{o.id}</td>
-                <td className="px-4 py-3 text-fg">{o.label}</td>
-                <td className="px-4 py-3 font-mono text-xs text-cool break-all">{o.url}</td>
+            {orchs.length === 0 ? (
+              <tr className="border-t border-border">
+                <td colSpan={3} className="px-4 py-3 text-sm text-faint">
+                  No orchestrators advertised.
+                </td>
               </tr>
-            ))}
+            ) : (
+              orchs.map((o) => (
+                <tr key={o.id} className="border-t border-border">
+                  <td className="px-4 py-3 font-mono text-muted">{o.id}</td>
+                  <td className="px-4 py-3 text-fg">{o.label}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-cool break-all">{o.url}</td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
 
       <h2 className="mt-10 text-base font-semibold text-fg">Live runners</h2>
       <p className="mt-2 max-w-2xl text-sm text-muted">
-        Polled from each orchestrator&apos;s{" "}
-        <span className="font-mono text-fg">/discovery</span> every ~30s. Capacity is
-        available/total.
+        Polled from SignerSession <span className="font-mono text-fg">discovery_url</span> every
+        ~30s. Capacity is available/total.
       </p>
 
       <div className="mt-6 space-y-8">

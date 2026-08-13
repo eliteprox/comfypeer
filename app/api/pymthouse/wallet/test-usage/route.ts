@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ingestTestUsageEvent, PmtHouseError } from "@/lib/pymthouse";
+import { parseTopUpAmountUsd } from "@/lib/top-up-amount";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,17 +19,11 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
-    const amountUsd =
-      typeof body.amountUsd === "number"
-        ? body.amountUsd
-        : Number(body.amountUsd);
-    if (!Number.isFinite(amountUsd) || amountUsd < 1) {
-      return NextResponse.json(
-        { error: "amountUsd must be at least 1" },
-        { status: 400 },
-      );
+    const parsed = parseTopUpAmountUsd(body.amountUsd);
+    if (!parsed.ok) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
-    const result = await ingestTestUsageEvent(externalUserId, amountUsd, {
+    const result = await ingestTestUsageEvent(externalUserId, parsed.amount, {
       collect: body.collect !== false,
     });
     return NextResponse.json(result);

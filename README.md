@@ -9,7 +9,7 @@ Real-time AI video from your own ComfyUI graph. Runs on Livepeer's GPU network. 
 
 - Next.js 15 (App Router) · React 19 · Tailwind CSS v4
 - PymtHouse Builder API (`@pymthouse/builder-sdk`) for metering & billing
-- Staging Livepeer orchestrators on `:8936`
+- Orchestrators from SignerSession `discovery_url` (`GET /discover-orchestrators`)
 
 ## Develop
 
@@ -32,10 +32,7 @@ pnpm dev
 
 See `design-system/MASTER.md` and `design-system/pages/*`.
 
-## Staging orchestrators
+## Orchestrator discovery
 
-| # | URL | IP |
-|---|---|---|
-| 1 | `https://liverunner-staging-1.daydream.monster:8936` | `136.66.21.17` |
-| 2 | `https://liverunner-2.daydream.monster:8936` | `136.109.52.89` |
-| 3 | `https://liverunner-3.daydream.monster:8936` | `35.230.73.110` |
+ComfyPeer mints an owner SignerSession and uses the suggested `discovery_url`
+(default `{signer_url}/discover-orchestrators`). `ORCH_URL` / `ORCH_URLS` are unused.
