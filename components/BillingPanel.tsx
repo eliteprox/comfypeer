@@ -411,7 +411,8 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
       <section>
         <h3 className="text-base font-semibold text-fg">Billing history</h3>
         <p className="mt-1 text-xs text-faint">
-          Credits added, usage that drew them down, and invoices.
+          Metered usage is activity; paid invoices settle the bill. Credits show
+          prepaid add/drawdown.
         </p>
         {ledger.length === 0 && invoices.length === 0 ? (
           <p className="mt-2 text-sm text-muted">No billing activity yet.</p>
@@ -428,10 +429,18 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
                     : entry.type === "refund"
                       ? "Refund"
                       : "Invoice";
+              // Usage amount is gross metered spend — not an open receivable.
+              // Prepaid burn is shown separately when credits were drawn down.
               const signed =
-                entry.type === "usage" || delta < 0
-                  ? `-$${Math.abs(amountUsd).toFixed(2)}`
-                  : `$${amountUsd.toFixed(2)}`;
+                entry.type === "usage"
+                  ? `$${amountUsd.toFixed(2)}`
+                  : delta < 0
+                    ? `-$${Math.abs(amountUsd).toFixed(2)}`
+                    : `$${amountUsd.toFixed(2)}`;
+              const prepaidNote =
+                entry.type === "usage" && delta < 0
+                  ? ` · −$${Math.abs(delta).toFixed(2)} prepaid`
+                  : "";
               return (
                 <li
                   key={entry.id}
@@ -442,6 +451,7 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
                     <p className="text-xs text-faint">
                       {formatInvoiceDate(entry.date)} · {label}
                       {entry.derived ? " · metered" : ""}
+                      {prepaidNote}
                     </p>
                   </div>
                   <span
