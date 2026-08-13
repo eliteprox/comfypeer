@@ -101,16 +101,57 @@ export function currentBillingPeriodLabel(now: Date = new Date()): string {
   });
 }
 
-/** Gross metered spend from prepaid-ledger usage rows (current cycle). */
-export function sumLedgerUsageUsdMicros(
-  entries: ReadonlyArray<{ type: string; amountUsdMicros: string }>,
+type LedgerAmountRow = {
+  type: string;
+  amountUsdMicros: string;
+  creditDeltaUsdMicros: string;
+};
+
+function absMicros(value: bigint): bigint {
+  return value < BigInt(0) ? -value : value;
+}
+
+/**
+ * Prepaid drawdowns plus collected invoices — what was billed this cycle,
+ * not gross meter (which still includes plan-included usage).
+ */
+export function sumLedgerBilledUsageUsdMicros(
+  entries: ReadonlyArray<LedgerAmountRow>,
 ): bigint {
   let total = BigInt(0);
   for (const entry of entries) {
-    if (entry.type !== "usage") continue;
-    total += parseUsdMicros(entry.amountUsdMicros);
+    if (entry.type === "usage") {
+      total += absMicros(parseUsdMicros(entry.creditDeltaUsdMicros));
+    } else if (entry.type === "invoice") {
+      total += parseUsdMicros(entry.amountUsdMicros);
+    }
   }
   return total;
+}
+
+/** Credit purchases, prepaid burns, and non-zero invoices/refunds. */
+export function isBillingHistoryRow(entry: LedgerAmountRow): boolean {
+  if (entry.type === "credit_purchased") {
+    return parseUsdMicros(entry.amountUsdMicros) !== BigInt(0);
+  }
+  if (entry.type === "usage") {
+    return parseUsdMicros(entry.creditDeltaUsdMicros) !== BigInt(0);
+  }
+  if (entry.type === "invoice" || entry.type === "refund") {
+    return parseUsdMicros(entry.amountUsdMicros) !== BigInt(0);
+  }
+  return false;
+}
+
+/** Signed amount for the history column: wallet delta, or invoice/refund total. */
+export function ledgerHistorySignedUsdMicros(entry: LedgerAmountRow): bigint {
+  if (entry.type === "usage" || entry.type === "credit_purchased") {
+    return parseUsdMicros(entry.creditDeltaUsdMicros);
+  }
+  if (entry.type === "refund") {
+    return -parseUsdMicros(entry.amountUsdMicros);
+  }
+  return parseUsdMicros(entry.amountUsdMicros);
 }
 
 export function formatInvoiceDate(iso: string | undefined): string {

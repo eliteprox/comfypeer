@@ -9,8 +9,10 @@ import {
   formatInvoiceAmount,
   formatInvoiceDate,
   formatSignedWalletUsd,
+  isBillingHistoryRow,
+  ledgerHistorySignedUsdMicros,
   spendPostureBadge,
-  sumLedgerUsageUsdMicros,
+  sumLedgerBilledUsageUsdMicros,
   type SpendPostureTone,
 } from "@/lib/billing-display";
 import {
@@ -303,6 +305,7 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
   const amountInvalid = amountInput.trim() !== "" && !parsedAmount.ok;
   const amountDisabled =
     busy === "topup" || busy === "test-usage" || !parsedAmount.ok;
+  const history = ledger.filter(isBillingHistoryRow);
 
   return (
     <div className="space-y-6">
@@ -349,10 +352,10 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
                   This period
                 </p>
                 <p className="mt-1 font-mono text-3xl tabular-nums text-fg">
-                  {formatSignedWalletUsd(sumLedgerUsageUsdMicros(ledger))}
+                  {formatSignedWalletUsd(sumLedgerBilledUsageUsdMicros(ledger))}
                 </p>
                 <p className="mt-1 text-xs text-muted">
-                  {currentBillingPeriodLabel()}
+                  Billed · {currentBillingPeriodLabel()}
                 </p>
               </div>
             </div>
@@ -470,16 +473,17 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
       <section>
         <h3 className="text-base font-semibold text-fg">Billing history</h3>
         <p className="mt-1 text-xs text-faint">
-          Metered usage is activity; paid invoices settle the bill. Credits show
-          prepaid add/drawdown.
+          Prepaid credits and collected invoices. Plan-included usage is omitted.
         </p>
-        {ledger.length === 0 && invoices.length === 0 ? (
-          <p className="mt-2 text-sm text-muted">No billing activity yet.</p>
-        ) : ledger.length > 0 ? (
+        {history.length > 0 ? (
           <ul className="mt-3 divide-y divide-border rounded-lg border border-border">
-            {ledger.slice(0, 20).map((entry) => {
-              const amountUsd = Number(BigInt(entry.amountUsdMicros || "0")) / 1_000_000;
-              const delta = Number(BigInt(entry.creditDeltaUsdMicros || "0")) / 1_000_000;
+            {history.slice(0, 20).map((entry) => {
+              const signedMicros = ledgerHistorySignedUsdMicros(entry);
+              const formatted = formatSignedWalletUsd(signedMicros);
+              const signed =
+                entry.type === "credit_purchased" && signedMicros > BigInt(0)
+                  ? `+${formatted}`
+                  : formatted;
               const label =
                 entry.type === "credit_purchased"
                   ? "Credit"
@@ -488,18 +492,6 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
                     : entry.type === "refund"
                       ? "Refund"
                       : "Invoice";
-              // Usage amount is gross metered spend — not an open receivable.
-              // Prepaid burn is shown separately when credits were drawn down.
-              const signed =
-                entry.type === "usage"
-                  ? `$${amountUsd.toFixed(2)}`
-                  : delta < 0
-                    ? `-$${Math.abs(amountUsd).toFixed(2)}`
-                    : `$${amountUsd.toFixed(2)}`;
-              const prepaidNote =
-                entry.type === "usage" && delta < 0
-                  ? ` · −$${Math.abs(delta).toFixed(2)} prepaid`
-                  : "";
               return (
                 <li
                   key={entry.id}
@@ -509,15 +501,11 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
                     <p className="text-xs text-fg">{entry.description}</p>
                     <p className="text-xs text-faint">
                       {formatInvoiceDate(entry.date)} · {label}
-                      {entry.derived ? " · metered" : ""}
-                      {prepaidNote}
                     </p>
                   </div>
                   <span
                     className={`font-mono tabular-nums ${
-                      entry.type === "usage" || delta < 0
-                        ? "text-muted"
-                        : "text-fg"
+                      signedMicros < BigInt(0) ? "text-muted" : "text-fg"
                     }`}
                   >
                     {signed}
@@ -526,7 +514,7 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
               );
             })}
           </ul>
-        ) : (
+        ) : invoices.length > 0 && ledger.length === 0 ? (
           <ul className="mt-3 divide-y divide-border rounded-lg border border-border">
             {invoices.map((inv) => (
               <li
@@ -560,6 +548,8 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
               </li>
             ))}
           </ul>
+        ) : (
+          <p className="mt-2 text-sm text-muted">No billing activity yet.</p>
         )}
       </section>
 
