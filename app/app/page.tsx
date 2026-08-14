@@ -17,18 +17,11 @@ import { LiveDemoWidget } from "@/components/LiveDemoWidget";
 import { useAuth } from "@/components/AuthProvider";
 import { PIPELINES, RESOLUTION_PRESETS, formatUsd } from "@/lib/constants";
 
-type BillingBanner = {
-  state: "active" | "overage" | "at_risk" | "blocked";
-  headline: string;
-  detail: string;
-};
-
 export default function StudioPage() {
   const { user, ready, signOut } = useAuth();
   const router = useRouter();
   const [pipelineId, setPipelineId] = useState<string>(PIPELINES[0]!.id);
   const [resId, setResId] = useState<string>(RESOLUTION_PRESETS[0]!.id);
-  const [banner, setBanner] = useState<BillingBanner | null>(null);
   const [balanceUsd, setBalanceUsd] = useState<number | null>(null);
   const [orchLabel, setOrchLabel] = useState<string>("—");
 
@@ -42,17 +35,16 @@ export default function StudioPage() {
       .then(async (r) => {
         if (!r.ok) return null;
         return r.json() as Promise<{
-          balanceUsdMicros?: string;
-          billing?: BillingBanner | null;
+          spendableUsd?: string;
           orchestrator?: string;
         }>;
       })
       .then((data) => {
         if (!data) return;
-        if (data.balanceUsdMicros != null) {
-          setBalanceUsd(Number(data.balanceUsdMicros) / 1_000_000);
+        if (data.spendableUsd != null) {
+          const n = Number(data.spendableUsd);
+          setBalanceUsd(Number.isFinite(n) ? n : 0);
         }
-        if (data.billing) setBanner(data.billing);
         if (data.orchestrator) setOrchLabel(data.orchestrator);
       })
       .catch(() => null);
@@ -66,14 +58,7 @@ export default function StudioPage() {
     );
   }
 
-  const bannerClass =
-    banner?.state === "blocked"
-      ? "border-billing-block text-billing-block"
-      : banner?.state === "at_risk"
-        ? "border-billing-warn text-billing-warn"
-        : banner?.state === "overage"
-          ? "border-overage text-overage"
-          : "border-live text-live";
+  const showTopUp = balanceUsd != null && balanceUsd <= 0;
 
   return (
     <div className="flex min-h-screen bg-canvas">
@@ -119,15 +104,15 @@ export default function StudioPage() {
           </Button>
         </header>
 
-        {banner && banner.state !== "active" ? (
-          <div className={`border-b px-4 py-2 text-sm ${bannerClass}`}>
-            <p className="font-medium">{banner.headline}</p>
-            <p className="text-xs opacity-90">{banner.detail}</p>
-            {(banner.state === "at_risk" || banner.state === "blocked") && (
-              <Button href="/app/settings#billing" variant="secondary" className="mt-2 !py-1 text-xs">
-                <CircleDollarSign className="h-3.5 w-3.5" strokeWidth={1.5} /> Top up
-              </Button>
-            )}
+        {showTopUp ? (
+          <div className="border-b border-billing-warn px-4 py-2 text-sm text-billing-warn">
+            <p className="font-medium">No spendable credit</p>
+            <p className="text-xs opacity-90">
+              Pending balance is $0.00. Add funds before starting a stream.
+            </p>
+            <Button href="/app/settings#billing" variant="secondary" className="mt-2 !py-1 text-xs">
+              <CircleDollarSign className="h-3.5 w-3.5" strokeWidth={1.5} /> Top up
+            </Button>
           </div>
         ) : null}
 

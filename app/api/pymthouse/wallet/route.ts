@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getBillingSnapshot, PmtHouseError } from "@/lib/pymthouse";
+import { loadUserCreditBalance, PmtHouseError } from "@/lib/pymthouse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,8 +11,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "externalUserId is required" }, { status: 400 });
   }
   try {
-    const snapshot = await getBillingSnapshot(externalUserId);
-    return NextResponse.json(snapshot);
+    const credits = await loadUserCreditBalance(externalUserId);
+    return NextResponse.json({ credits });
   } catch (error) {
     if (error instanceof PmtHouseError) {
       return NextResponse.json(

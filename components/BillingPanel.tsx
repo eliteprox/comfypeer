@@ -1,21 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { BillingState } from "@pymthouse/builder-sdk";
 import { Button } from "@/components/Button";
-import {
-  availableRunway,
-  currentBillingPeriodLabel,
-  formatInvoiceAmount,
-  formatInvoiceDate,
-  formatSignedWalletUsd,
-  isBillingHistoryRow,
-  isCollectedStripeHistoryItem,
-  ledgerHistorySignedUsdMicros,
-  spendPostureBadge,
-  sumLedgerBilledUsageUsdMicros,
-  type SpendPostureTone,
-} from "@/lib/billing-display";
 import {
   formatTopUpUsdLabel,
   parseTopUpAmountUsd,
@@ -23,6 +9,15 @@ import {
   TOP_UP_MAX_USD,
   TOP_UP_MIN_USD,
 } from "@/lib/top-up-amount";
+
+type CreditBalance = {
+  customerId: string;
+  currency: string;
+  live: string;
+  pending: string;
+  settled: string;
+  retrievedAt: string | null;
+};
 
 type Invoice = {
   id: string;
@@ -35,20 +30,6 @@ type Invoice = {
   invoiceType?: string;
 };
 
-type LedgerEntry = {
-  id: string;
-  date: string;
-  type: "credit_purchased" | "usage" | "invoice" | "refund";
-  description: string;
-  amountUsdMicros: string;
-  creditDeltaUsdMicros: string;
-  balanceUsdMicros: string | null;
-  derived: boolean;
-  status?: string | null;
-  invoiceId?: string | null;
-  hostedInvoiceUrl?: string | null;
-};
-
 type PaymentMethod = {
   id: string;
   brand: string | null;
@@ -57,20 +38,6 @@ type PaymentMethod = {
 };
 
 const QUICK_AMOUNTS = [1, 10, 25, 100] as const;
-
-const POSTURE_CLASS: Record<SpendPostureTone, string> = {
-  ok: "border-live/40 text-live",
-  info: "border-cool/40 text-cool",
-  warn: "border-billing-warn/40 text-billing-warn",
-  danger: "border-billing-block/40 text-billing-block",
-};
-
-const RUNWAY_CLASS: Record<SpendPostureTone, string> = {
-  ok: "text-fg",
-  info: "text-fg",
-  warn: "text-billing-warn",
-  danger: "text-billing-block",
-};
 
 function redirectToCheckout(url: string): void {
   const parsed = new URL(url);
@@ -82,13 +49,52 @@ function redirectToCheckout(url: string): void {
   window.location.assign(parsed.toString());
 }
 
+function formatCreditUsd(amount: string, currency: string): string {
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return amount;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: currency.toUpperCase() || "USD",
+  }).format(n);
+}
+
+function formatInvoiceDate(iso: string | undefined): string {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function isCollectedStripeHistoryItem(item: {
+  invoiceType?: string;
+  totalAmount: string;
+}): boolean {
+  if ((item.invoiceType ?? "").trim().toLowerCase() === "pending_usage") {
+    return false;
+  }
+  const amount = Number(item.totalAmount);
+  return Number.isFinite(amount) && amount !== 0;
+}
+
+function formatInvoiceAmount(totalAmount: string, currency: string): string {
+  const n = Number(totalAmount);
+  if (!Number.isFinite(n)) return totalAmount;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: currency?.toUpperCase() || "USD",
+  }).format(n);
+}
+
 export function BillingPanel({ externalUserId }: { externalUserId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
-  const [billingState, setBillingState] = useState<BillingState | null>(null);
+  const [credits, setCredits] = useState<CreditBalance | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [ledger, setLedger] = useState<LedgerEntry[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [amountInput, setAmountInput] = useState("10");
   const [busy, setBusy] = useState<"topup" | "pm" | "test-usage" | string | null>(
@@ -100,33 +106,23 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
     setError(null);
     const qs = `externalUserId=${encodeURIComponent(externalUserId)}`;
     try {
-      const [walletRes, invRes, txRes, pmRes] = await Promise.all([
+      const [walletRes, invRes, pmRes] = await Promise.all([
         fetch(`/api/pymthouse/wallet?${qs}`),
         fetch(`/api/pymthouse/wallet/invoices?${qs}&pageSize=20`),
-        fetch(`/api/pymthouse/wallet/transactions?${qs}`),
         fetch(`/api/pymthouse/wallet/payment-methods?${qs}`),
       ]);
       if (!walletRes.ok) {
         const body = (await walletRes.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error || "Failed to load billing");
       }
-      const wallet = (await walletRes.json()) as {
-        billingState: BillingState;
-      };
-      setBillingState(wallet.billingState);
+      const wallet = (await walletRes.json()) as { credits: CreditBalance };
+      setCredits(wallet.credits);
 
       if (invRes.ok) {
         const inv = (await invRes.json()) as { items?: Invoice[] };
         setInvoices(inv.items ?? []);
       } else {
         setInvoices([]);
-      }
-
-      if (txRes.ok) {
-        const tx = (await txRes.json()) as { items?: LedgerEntry[] };
-        setLedger(tx.items ?? []);
-      } else {
-        setLedger([]);
       }
 
       if (pmRes.ok) {
@@ -297,8 +293,11 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
     );
   }
 
-  const posture = billingState ? spendPostureBadge(billingState.status) : null;
-  const runway = billingState ? availableRunway(billingState) : null;
+  const currency = credits?.currency ?? "USD";
+  const liveNum = credits ? Number(credits.live) : 0;
+  const pendingNum = credits ? Number(credits.pending) : 0;
+  const hasCredit = Number.isFinite(liveNum) && liveNum > 0;
+  const hasPendingGrants = Number.isFinite(pendingNum) && pendingNum > 0;
   const defaultPm =
     paymentMethods.find((pm) => pm.isDefault) ?? paymentMethods[0] ?? null;
   const parsedAmount = parseTopUpAmountUsd(amountInput);
@@ -308,7 +307,6 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
   const amountInvalid = amountInput.trim() !== "" && !parsedAmount.ok;
   const amountDisabled =
     busy === "topup" || busy === "test-usage" || !parsedAmount.ok;
-  const history = ledger.filter(isBillingHistoryRow);
   const stripeHistory = invoices.filter(isCollectedStripeHistoryItem);
 
   return (
@@ -325,47 +323,65 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
       ) : null}
 
       <section className="rounded-lg border border-border bg-surface p-5">
-        {billingState && posture && runway ? (
+        {credits ? (
           <>
             <div className="flex flex-wrap items-center gap-2">
               <span
-                className={`rounded border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide ${POSTURE_CLASS[posture.tone]}`}
+                className={`rounded border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide ${
+                  hasCredit
+                    ? "border-live/40 text-live"
+                    : "border-billing-warn/40 text-billing-warn"
+                }`}
               >
-                {posture.label}
+                {hasCredit ? "Credits available" : "No spendable credit"}
               </span>
-              <p className="text-sm font-semibold text-fg">{billingState.explain.headline}</p>
             </div>
-            <p className="mt-1 text-sm text-muted">{billingState.explain.detail}</p>
+            <p className="mt-1 text-sm text-muted">
+              Live is spendable credit after open charges. Settled is the
+              committed ledger. Balances are {currency} and are not merged
+              across currencies.
+            </p>
 
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <div>
                 <p className="font-mono text-[10px] uppercase tracking-wide text-faint">
-                  Available
+                  Live
                 </p>
                 <p
-                  className={`mt-1 font-mono text-3xl tabular-nums ${RUNWAY_CLASS[runway.tone]}`}
+                  className={`mt-1 font-mono text-3xl tabular-nums ${
+                    hasCredit ? "text-fg" : "text-billing-warn"
+                  }`}
                 >
-                  {runway.usd}
+                  {formatCreditUsd(credits.live, currency)}
                 </p>
-                {runway.detail ? (
-                  <p className="mt-1 text-xs text-muted">{runway.detail}</p>
-                ) : null}
+                <p className="mt-1 text-xs text-muted">Can spend</p>
               </div>
               <div>
                 <p className="font-mono text-[10px] uppercase tracking-wide text-faint">
-                  This period
+                  Settled
                 </p>
                 <p className="mt-1 font-mono text-3xl tabular-nums text-fg">
-                  {formatSignedWalletUsd(sumLedgerBilledUsageUsdMicros(ledger))}
+                  {formatCreditUsd(credits.settled, currency)}
                 </p>
-                <p className="mt-1 text-xs text-muted">
-                  Billed · {currentBillingPeriodLabel()}
-                </p>
+                <p className="mt-1 text-xs text-muted">Committed ledger</p>
               </div>
             </div>
+            {hasPendingGrants ? (
+              <p className="mt-3 font-mono text-xs text-faint">
+                Pending grants {formatCreditUsd(credits.pending, currency)} (not
+                spendable yet)
+                {credits.retrievedAt
+                  ? ` · ${new Date(credits.retrievedAt).toLocaleString()}`
+                  : ""}
+              </p>
+            ) : credits.retrievedAt ? (
+              <p className="mt-3 font-mono text-xs text-faint">
+                {new Date(credits.retrievedAt).toLocaleString()}
+              </p>
+            ) : null}
           </>
         ) : (
-          <p className="text-sm text-muted">Billing state unavailable.</p>
+          <p className="text-sm text-muted">Credit balance unavailable.</p>
         )}
 
         <div className="mt-5 space-y-3 border-t border-border pt-4">
@@ -477,8 +493,7 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
       <section>
         <h3 className="text-base font-semibold text-fg">Billing history</h3>
         <p className="mt-1 text-xs text-faint">
-          Stripe invoices and payments for this user. Prepaid ledger rows are
-          a fallback when Connect history has not loaded.
+          Stripe invoices and payments for this user.
         </p>
         {stripeHistory.length > 0 ? (
           <ul className="mt-3 divide-y divide-border rounded-lg border border-border">
@@ -517,45 +532,6 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
                       </button>
                     ) : null}
                   </div>
-                </li>
-              );
-            })}
-          </ul>
-        ) : history.length > 0 ? (
-          <ul className="mt-3 divide-y divide-border rounded-lg border border-border">
-            {history.slice(0, 20).map((entry) => {
-              const signedMicros = ledgerHistorySignedUsdMicros(entry);
-              const formatted = formatSignedWalletUsd(signedMicros);
-              const signed =
-                entry.type === "credit_purchased" && signedMicros > BigInt(0)
-                  ? `+${formatted}`
-                  : formatted;
-              const label =
-                entry.type === "credit_purchased"
-                  ? "Credit"
-                  : entry.type === "usage"
-                    ? "Usage"
-                    : entry.type === "refund"
-                      ? "Refund"
-                      : "Invoice";
-              return (
-                <li
-                  key={entry.id}
-                  className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm"
-                >
-                  <div className="min-w-0">
-                    <p className="text-xs text-fg">{entry.description}</p>
-                    <p className="text-xs text-faint">
-                      {formatInvoiceDate(entry.date)} · {label}
-                    </p>
-                  </div>
-                  <span
-                    className={`font-mono tabular-nums ${
-                      signedMicros < BigInt(0) ? "text-muted" : "text-fg"
-                    }`}
-                  >
-                    {signed}
-                  </span>
                 </li>
               );
             })}

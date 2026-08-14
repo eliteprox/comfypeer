@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { getPrimaryOrchestrator } from "@/lib/discovery";
-import { getBillingSnapshot, PmtHouseError } from "@/lib/pymthouse";
+import { loadUserCreditBalance, PmtHouseError } from "@/lib/pymthouse";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -12,20 +13,14 @@ export async function GET(request: Request) {
   }
 
   try {
-    const [{ balance, billingState }, orch] = await Promise.all([
-      getBillingSnapshot(externalUserId),
+    const [credits, orch] = await Promise.all([
+      loadUserCreditBalance(externalUserId),
       getPrimaryOrchestrator(),
     ]);
+    const live = Number(credits.live);
     return NextResponse.json({
-      balanceUsdMicros: balance.balanceUsdMicros,
-      consumedUsdMicros: balance.consumedUsdMicros,
-      lifetimeGrantedUsdMicros: balance.lifetimeGrantedUsdMicros,
-      billing: {
-        state: billingState.status,
-        headline: billingState.explain.headline,
-        detail: billingState.explain.detail,
-      },
-      billingState,
+      spendableUsd: credits.live,
+      canSpend: Number.isFinite(live) && live > 0,
       orchestrator: orch?.label ?? null,
     });
   } catch (error) {

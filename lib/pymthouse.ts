@@ -8,8 +8,6 @@ import {
   type AppUserInvoice,
   type AppUserInvoiceHostedUrlResult,
   type AppUserPaymentMethod,
-  type BillingState,
-  type UsageBalanceResponse,
 } from "@pymthouse/builder-sdk";
 
 function readPymthouseM2mConfig() {
@@ -262,18 +260,41 @@ export async function createUserApiKey(externalUserId: string, label?: string) {
   };
 }
 
-/** SDK: balance + billing posture for Settings / studio. */
-export async function getBillingSnapshot(externalUserId: string): Promise<{
-  balance: UsageBalanceResponse;
-  billingState: BillingState;
-}> {
-  const client = createPmtHouseClient();
+export type UserCreditBalance = {
+  externalUserId: string;
+  customerId: string;
+  currency: string;
+  live: string;
+  pending: string;
+  settled: string;
+  retrievedAt: string | null;
+};
+
+/** Konnect GET /credits/balance for this end user. Use `live` to gate spend. */
+export async function loadUserCreditBalance(
+  externalUserId: string,
+): Promise<UserCreditBalance> {
   await ensureAppUserProvisioned(externalUserId);
-  const [balance, billingState] = await Promise.all([
-    client.getUsageBalance(externalUserId),
-    client.getBillingState(externalUserId),
-  ]);
-  return { balance, billingState };
+  const clientId = readPublicClientId();
+  const response = await fetch(
+    `${appsOrigin()}/api/v1/apps/${encodeURIComponent(clientId)}/users/${encodeURIComponent(externalUserId)}/allowances`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: m2mAuthHeader(),
+        Accept: "application/json",
+      },
+      cache: "no-store",
+    },
+  );
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new PmtHouseError(text || "Failed to load credit balance", {
+      status: response.status,
+      code: "credit_balance_failed",
+    });
+  }
+  return (await response.json()) as UserCreditBalance;
 }
 
 /** SDK: end-user invoices (decimal dollars, not micros). */
@@ -447,5 +468,5 @@ export async function ingestTestUsageEvent(
   return (await response.json()) as TestUsageEventResult;
 }
 
-export type { AppUserInvoice, AppUserPaymentMethod, BillingState, UsageBalanceResponse };
+export type { AppUserInvoice, AppUserPaymentMethod };
 export { PmtHouseError };
