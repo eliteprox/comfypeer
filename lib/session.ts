@@ -5,15 +5,17 @@ export const SESSION_COOKIE = "comfypeer_session";
 const SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 30;
 
 function sessionSecret(): string | null {
-  return (
-    process.env.COMFYPEER_SESSION_SECRET?.trim() ||
-    process.env.PYMTHOUSE_M2M_CLIENT_SECRET?.trim() ||
-    null
-  );
+  return process.env.COMFYPEER_SESSION_SECRET?.trim() || null;
 }
 
-function signUserId(externalUserId: string, secret: string): string {
-  return createHmac("sha256", secret).update(externalUserId).digest("base64url");
+export function sessionSecretConfigured(): boolean {
+  return sessionSecret() !== null;
+}
+
+function signSession(externalUserId: string, expiresAtSec: number, secret: string): string {
+  return createHmac("sha256", secret)
+    .update(`${externalUserId}.${expiresAtSec}`)
+    .digest("base64url");
 }
 
 function cookieOptions(maxAge: number) {
@@ -26,11 +28,21 @@ function cookieOptions(maxAge: number) {
   };
 }
 
-export function setSessionCookie(response: NextResponse, externalUserId: string): void {
+export type SessionCookieResult = { ok: true } | { ok: false; error: string };
+
+export function setSessionCookie(
+  response: NextResponse,
+  externalUserId: string,
+): SessionCookieResult {
   const secret = sessionSecret();
-  if (!secret) return;
-  const token = `${externalUserId}.${signUserId(externalUserId, secret)}`;
+  if (!secret) {
+    return { ok: false, error: "COMFYPEER_SESSION_SECRET is not configured" };
+  }
+  const expiresAtSec = Math.floor(Date.now() / 1000) + SESSION_MAX_AGE_SEC;
+  const mac = signSession(externalUserId, expiresAtSec, secret);
+  const token = `${externalUserId}.${expiresAtSec}.${mac}`;
   response.cookies.set(SESSION_COOKIE, token, cookieOptions(SESSION_MAX_AGE_SEC));
+  return { ok: true };
 }
 
 export function clearSessionCookie(response: NextResponse): void {
@@ -40,12 +52,15 @@ export function clearSessionCookie(response: NextResponse): void {
 export function sessionUserIdFromRequest(request: NextRequest): string | null {
   const secret = sessionSecret();
   const raw = request.cookies.get(SESSION_COOKIE)?.value ?? "";
-  const dot = raw.lastIndexOf(".");
-  if (!secret || dot <= 0) return null;
-  const externalUserId = raw.slice(0, dot);
-  const mac = raw.slice(dot + 1);
-  if (!externalUserId || !mac) return null;
-  const expected = signUserId(externalUserId, secret);
+  const parts = raw.split(".");
+  if (!secret || parts.length !== 3) return null;
+  const [externalUserId, expiresAtRaw, mac] = parts;
+  const expiresAtSec = Number(expiresAtRaw);
+  if (!externalUserId || !mac || !Number.isFinite(expiresAtSec) || expiresAtSec <= 0) {
+    return null;
+  }
+  if (Math.floor(Date.now() / 1000) > expiresAtSec) return null;
+  const expected = signSession(externalUserId, expiresAtSec, secret);
   const left = Buffer.from(mac);
   const right = Buffer.from(expected);
   if (left.length !== right.length || !timingSafeEqual(left, right)) return null;

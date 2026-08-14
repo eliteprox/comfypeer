@@ -599,7 +599,7 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
           <input
             type="checkbox"
             checked={autoTopUp?.enabled ?? false}
-            disabled={autoTopUpBusy || !defaultPm}
+            disabled={autoTopUpBusy || (!defaultPm && !autoTopUp?.enabled)}
             onChange={(e) => {
               const next = e.target.checked;
               if (next && !defaultPm) {
@@ -621,7 +621,11 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
             parsed={parsedAutoTopUpAmount}
             disabled={autoTopUpBusy}
             onChange={setAutoTopUpAmount}
-            onCommit={autoTopUp?.enabled ? (next) => void onSaveAutoTopUp(true, next) : undefined}
+            onCommit={
+              autoTopUp?.enabled && defaultPm
+                ? (next) => void onSaveAutoTopUp(true, next)
+                : undefined
+            }
           />
         </div>
         <p className="mt-2 text-xs text-faint">

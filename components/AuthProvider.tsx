@@ -54,7 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           await fetch("/api/session", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ externalUserId: next.id }),
+            body: JSON.stringify({ email: next.email }),
           }).catch(() => null);
         }
       } catch {
@@ -79,7 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await fetch("/api/pymthouse/provision", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ externalUserId: id, email: next.email }),
+      body: JSON.stringify({ email: next.email }),
     }).catch(() => null);
   }, []);
 
