@@ -75,15 +75,23 @@ function formatInvoiceDate(iso: string | undefined): string {
   });
 }
 
-function isCollectedStripeHistoryItem(item: {
+function isVisibleBillingHistoryItem(item: {
   invoiceType?: string;
   totalAmount: string;
 }): boolean {
-  if ((item.invoiceType ?? "").trim().toLowerCase() === "pending_usage") {
-    return false;
+  const type = (item.invoiceType ?? "").trim().toLowerCase();
+  if (type === "pending_usage") {
+    return true;
   }
   const amount = Number(item.totalAmount);
   return Number.isFinite(amount) && amount !== 0;
+}
+
+function billingHistoryKind(invoiceType: string | undefined): string {
+  const type = (invoiceType ?? "").trim().toLowerCase();
+  if (type === "pending_usage") return "Unbilled usage";
+  if (type === "auto_topup" || type === "payment") return "Payment";
+  return "Invoice";
 }
 
 function formatInvoiceAmount(totalAmount: string, currency: string): string {
@@ -305,7 +313,12 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
   }
 
   async function openInvoice(invoice: Invoice) {
-    if (invoice.invoiceType === "auto_topup") return;
+    if (
+      invoice.invoiceType === "auto_topup" ||
+      invoice.invoiceType === "pending_usage"
+    ) {
+      return;
+    }
     setBusy(invoice.id);
     setError(null);
     try {
@@ -365,7 +378,7 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
   const amountInvalid = amountInput.trim() !== "" && !parsedAmount.ok;
   const amountDisabled =
     busy === "topup" || busy === "test-usage" || !parsedAmount.ok;
-  const stripeHistory = invoices.filter(isCollectedStripeHistoryItem);
+  const stripeHistory = invoices.filter(isVisibleBillingHistoryItem);
 
   return (
     <div className="space-y-6">
@@ -621,10 +634,7 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
         {stripeHistory.length > 0 ? (
           <ul className="mt-3 divide-y divide-border rounded-lg border border-border">
             {stripeHistory.slice(0, 20).map((inv) => {
-              const kind =
-                inv.invoiceType === "auto_topup" || inv.invoiceType === "payment"
-                  ? "Payment"
-                  : "Invoice";
+              const kind = billingHistoryKind(inv.invoiceType);
               return (
                 <li
                   key={inv.id}
