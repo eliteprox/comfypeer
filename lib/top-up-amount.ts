@@ -1,5 +1,6 @@
 export const TOP_UP_MIN_USD = 1;
 export const TOP_UP_MAX_USD = 10_000;
+export const DEFAULT_TOP_UP_USD = 10;
 
 const AMOUNT_PATTERN = /^(\d{1,5})(?:\.(\d{1,2}))?$/;
 
@@ -21,11 +22,7 @@ export function parseTopUpAmountUsd(
     };
   }
   const amount = Number(raw);
-  if (
-    !Number.isFinite(amount) ||
-    amount < TOP_UP_MIN_USD ||
-    amount > TOP_UP_MAX_USD
-  ) {
+  if (!Number.isFinite(amount) || amount < TOP_UP_MIN_USD || amount > TOP_UP_MAX_USD) {
     return { ok: false, error: "amountUsd must be 1–10000" };
   }
   return { ok: true, amount };
