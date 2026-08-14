@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
     const result = await ingestTestUsageEvent(externalUserId, parsed.amount, {
-      collect: body.collect !== false,
+      collect: body.collect === true,
     });
     return NextResponse.json(result);
   } catch (error) {

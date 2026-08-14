@@ -204,7 +204,6 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
         body: JSON.stringify({
           externalUserId,
           amountUsd: parsed.amount,
-          collect: true,
         }),
       });
       const data = (await res.json()) as {
@@ -215,12 +214,15 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
       };
       if (!res.ok) throw new Error(data.error || "Test usage failed");
       const invoiceIds = data.collect?.invoiceIds ?? [];
-      const outcome = data.collect?.outcome ?? "skipped";
+      const outcome = data.collect?.outcome;
       const fallback = parsed.amount.toFixed(2);
+      const ingested = `Test usage $${data.amountUsd ?? fallback} ingested (${data.requestId})`;
       setFlash(
         invoiceIds.length > 0
-          ? `Test usage $${data.amountUsd ?? fallback} ingested (${data.requestId}). Invoice ${outcome}: ${invoiceIds.join(", ")}`
-          : `Test usage $${data.amountUsd ?? fallback} ingested (${data.requestId}). Collect outcome: ${outcome}`,
+          ? `${ingested}. Invoice ${outcome}: ${invoiceIds.join(", ")}`
+          : outcome
+            ? `${ingested}. Collect outcome: ${outcome}`
+            : `${ingested}. Invoice collection is automatic and may take a few minutes.`,
       );
       await load();
     } catch (e) {
@@ -445,7 +447,7 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
         >
           {amountInvalid
             ? `Enter $${TOP_UP_MIN_USD}–$${TOP_UP_MAX_USD.toLocaleString()} (up to 2 decimals).`
-            : `Min $${TOP_UP_MIN_USD} · max $${TOP_UP_MAX_USD.toLocaleString()}. Test usage posts a CloudEvent into OpenMeter (same meter as Kafka ingest), then forces collection so you can follow Custom Invoicing → settlement → Stripe Connect.`}
+            : `Min $${TOP_UP_MIN_USD} · max $${TOP_UP_MAX_USD.toLocaleString()}. Test usage posts a CloudEvent into OpenMeter (same meter as Kafka ingest). Collection follows the automatic invoice path — usually a minute or few, not instant.`}
         </p>
       </section>
 

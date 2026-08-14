@@ -410,7 +410,8 @@ export type TestUsageEventResult = {
 };
 
 /**
- * Demo: ingest a usage CloudEvent and optionally force invoice collection.
+ * Demo: ingest a usage CloudEvent. Collection is opt-in (`collect: true`);
+ * the default matches production traffic (automatic invoice path only).
  * M2M POST …/billing/wallet/test-usage
  */
 export async function ingestTestUsageEvent(
@@ -431,7 +432,7 @@ export async function ingestTestUsageEvent(
       body: JSON.stringify({
         externalUserId,
         amountUsd: amountUsd.toFixed(2),
-        collect: opts?.collect !== false,
+        collect: opts?.collect === true,
       }),
       cache: "no-store",
     },
