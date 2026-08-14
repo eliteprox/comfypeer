@@ -44,13 +44,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setUser(JSON.parse(raw) as ComfyUser);
-    } catch {
-      /* ignore */
-    }
-    setReady(true);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const next = JSON.parse(raw) as ComfyUser;
+          if (!cancelled) setUser(next);
+          await fetch("/api/session", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: next.email }),
+          }).catch(() => null);
+        }
+      } catch {
+        /* ignore */
+      }
+      if (!cancelled) setReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const signIn = useCallback(async (email: string, name?: string) => {
@@ -65,19 +79,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await fetch("/api/pymthouse/provision", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ externalUserId: id, email: next.email }),
+      body: JSON.stringify({ email: next.email }),
     }).catch(() => null);
   }, []);
 
   const signOut = useCallback(() => {
     localStorage.removeItem(STORAGE_KEY);
     setUser(null);
+    void fetch("/api/session", { method: "DELETE" }).catch(() => null);
   }, []);
 
-  const value = useMemo(
-    () => ({ user, ready, signIn, signOut }),
-    [user, ready, signIn, signOut],
-  );
+  const value = useMemo(() => ({ user, ready, signIn, signOut }), [user, ready, signIn, signOut]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

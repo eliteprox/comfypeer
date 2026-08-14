@@ -93,8 +93,7 @@ function discoverOrchestratorsUrlFromSigner(signerUrl: string): string {
 }
 
 function discoveryUrlFromSignerSession(body: Record<string, unknown>): string {
-  const discovery =
-    typeof body.discovery_url === "string" ? body.discovery_url.trim() : "";
+  const discovery = typeof body.discovery_url === "string" ? body.discovery_url.trim() : "";
   if (discovery) {
     return absoluteHttpUrl(discovery, "discovery_url").toString();
   }
@@ -161,8 +160,7 @@ export async function mintOwnerSignerSession(): Promise<OwnerSignerSession> {
     });
   }
   const body = parsed as Record<string, unknown>;
-  const accessToken =
-    typeof body.access_token === "string" ? body.access_token.trim() : "";
+  const accessToken = typeof body.access_token === "string" ? body.access_token.trim() : "";
   if (!accessToken) {
     throw new PmtHouseError("SignerSession mint returned no access_token", {
       status: 502,
@@ -205,11 +203,7 @@ function appUrl(): string {
 
 export function isUserNotFoundError(error: unknown): boolean {
   if (!(error instanceof PmtHouseError)) return false;
-  return (
-    error.status === 404 ||
-    error.code === "user_not_found" ||
-    error.code === "not_found"
-  );
+  return error.status === 404 || error.code === "user_not_found" || error.code === "not_found";
 }
 
 export async function ensureAppUserProvisioned(
@@ -271,9 +265,7 @@ export type UserCreditBalance = {
 };
 
 /** Konnect GET /credits/balance for this end user. Use `live` to gate spend. */
-export async function loadUserCreditBalance(
-  externalUserId: string,
-): Promise<UserCreditBalance> {
+export async function loadUserCreditBalance(externalUserId: string): Promise<UserCreditBalance> {
   await ensureAppUserProvisioned(externalUserId);
   const clientId = readPublicClientId();
   const response = await fetch(
@@ -295,6 +287,81 @@ export async function loadUserCreditBalance(
     });
   }
   return (await response.json()) as UserCreditBalance;
+}
+
+export type WalletAutoTopUp = {
+  enabled: boolean;
+  amountUsd: string | null;
+};
+
+function merchantWalletUrl(externalUserId?: string): URL {
+  const clientId = readPublicClientId();
+  const url = new URL(`${appsOrigin()}/api/v1/apps/${encodeURIComponent(clientId)}/billing/wallet`);
+  if (externalUserId) {
+    url.searchParams.set("externalUserId", externalUserId);
+  }
+  return url;
+}
+
+async function merchantWalletRequest(
+  url: URL,
+  init: RequestInit,
+  fallbackMessage: string,
+  fallbackCode: string,
+): Promise<Response> {
+  const response = await fetch(url.toString(), {
+    ...init,
+    headers: {
+      Authorization: m2mAuthHeader(),
+      Accept: "application/json",
+      ...(init.headers ?? {}),
+    },
+    cache: "no-store",
+  });
+  if (response.ok) return response;
+  const body = (await response.json().catch(() => ({}))) as {
+    error?: string;
+    code?: string;
+  };
+  throw new PmtHouseError(body.error || fallbackMessage, {
+    status: response.status,
+    code: body.code || fallbackCode,
+  });
+}
+
+/** Merchant wallet auto-top-up prefs from GET …/billing/wallet. */
+export async function loadWalletAutoTopUp(externalUserId: string): Promise<WalletAutoTopUp> {
+  const response = await merchantWalletRequest(
+    merchantWalletUrl(externalUserId),
+    { method: "GET" },
+    "Failed to load auto top-up",
+    "auto_topup_load_failed",
+  );
+  const body = (await response.json()) as { autoTopUp?: WalletAutoTopUp | null };
+  return body.autoTopUp ?? { enabled: false, amountUsd: null };
+}
+
+export async function saveWalletAutoTopUp(input: {
+  externalUserId: string;
+  enabled: boolean;
+  amountUsd: string;
+}): Promise<WalletAutoTopUp> {
+  const response = await merchantWalletRequest(
+    merchantWalletUrl(),
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        externalUserId: input.externalUserId,
+        enabled: input.enabled,
+        amountUsd: input.amountUsd,
+      }),
+    },
+    "Failed to save auto top-up",
+    "auto_topup_save_failed",
+  );
+  const body = (await response.json()) as { autoTopUp?: WalletAutoTopUp };
+  return body.autoTopUp ?? { enabled: input.enabled, amountUsd: input.amountUsd };
 }
 
 /** SDK: end-user invoices (decimal dollars, not micros). */

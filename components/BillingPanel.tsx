@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/Button";
 import {
+  DEFAULT_TOP_UP_USD,
   formatTopUpUsdLabel,
   parseTopUpAmountUsd,
   sanitizeTopUpAmountInput,
@@ -17,6 +18,11 @@ type CreditBalance = {
   pending: string;
   settled: string;
   retrievedAt: string | null;
+};
+
+type AutoTopUp = {
+  enabled: boolean;
+  amountUsd: string | null;
 };
 
 type Invoice = {
@@ -38,13 +44,109 @@ type PaymentMethod = {
 };
 
 const QUICK_AMOUNTS = [1, 10, 25, 100] as const;
+const AUTO_TOP_UP_AMOUNTS = [10, 25, 50, 100] as const;
+const DEFAULT_AUTO_TOP_UP_AMOUNT = String(DEFAULT_TOP_UP_USD);
+
+function normalizedAutoTopUpAmount(raw: string | null | undefined): string {
+  const parsed = parseTopUpAmountUsd(raw ?? "");
+  return parsed.ok ? formatTopUpUsdLabel(parsed.amount) : DEFAULT_AUTO_TOP_UP_AMOUNT;
+}
+
+function AmountQuickPick({
+  inputId,
+  label,
+  placeholder,
+  amounts,
+  value,
+  parsed,
+  disabled,
+  invalid,
+  describedBy,
+  onChange,
+  onCommit,
+  onEnter,
+}: {
+  inputId: string;
+  label: string;
+  placeholder: string;
+  amounts: readonly number[];
+  value: string;
+  parsed: ReturnType<typeof parseTopUpAmountUsd>;
+  disabled?: boolean;
+  invalid?: boolean;
+  describedBy?: string;
+  onChange: (next: string) => void;
+  onCommit?: (next: string) => void;
+  onEnter?: () => void;
+}) {
+  const selected = parsed.ok ? parsed.amount : null;
+  return (
+    <div className="flex flex-wrap items-end gap-2">
+      {amounts.map((n) => (
+        <button
+          key={n}
+          type="button"
+          disabled={disabled}
+          onClick={() => {
+            const next = String(n);
+            onChange(next);
+            onCommit?.(next);
+          }}
+          className={`rounded-md border px-3 py-1.5 font-mono text-xs tabular-nums ${
+            selected === n
+              ? "border-live bg-live-dim text-live"
+              : "border-border text-muted hover:border-border-strong hover:text-fg"
+          }`}
+        >
+          ${n}
+        </button>
+      ))}
+      <label htmlFor={inputId} className="relative inline-flex items-center">
+        <span className="sr-only">{label}</span>
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute left-2.5 font-mono text-xs text-muted"
+        >
+          $
+        </span>
+        <input
+          id={inputId}
+          inputMode="decimal"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder={placeholder}
+          aria-invalid={invalid}
+          aria-describedby={describedBy}
+          disabled={disabled}
+          value={value}
+          onChange={(e) => onChange(sanitizeTopUpAmountInput(e.target.value))}
+          onBlur={() => {
+            if (parsed.ok) onCommit?.(value);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && onEnter) {
+              e.preventDefault();
+              onEnter();
+            }
+          }}
+          className={`h-7.5 w-28 rounded-md border bg-elevated py-1.5 pl-6 pr-2 font-mono text-xs tabular-nums text-fg outline-none placeholder:text-faint focus-visible:ring-1 focus-visible:ring-live/30 ${
+            invalid
+              ? "border-billing-block"
+              : parsed.ok && !amounts.some((n) => n === parsed.amount)
+                ? "border-live bg-live-dim text-live"
+                : "border-border"
+          }`}
+        />
+      </label>
+    </div>
+  );
+}
 
 function redirectToCheckout(url: string): void {
   const parsed = new URL(url);
   const ok =
     parsed.protocol === "https:" &&
-    (parsed.hostname === "checkout.stripe.com" ||
-      parsed.hostname.endsWith(".stripe.com"));
+    (parsed.hostname === "checkout.stripe.com" || parsed.hostname.endsWith(".stripe.com"));
   if (!ok) throw new Error("Checkout URL host is not allowed.");
   window.location.assign(parsed.toString());
 }
@@ -69,15 +171,20 @@ function formatInvoiceDate(iso: string | undefined): string {
   });
 }
 
-function isCollectedStripeHistoryItem(item: {
-  invoiceType?: string;
-  totalAmount: string;
-}): boolean {
-  if ((item.invoiceType ?? "").trim().toLowerCase() === "pending_usage") {
-    return false;
+function isVisibleBillingHistoryItem(item: { invoiceType?: string; totalAmount: string }): boolean {
+  const type = (item.invoiceType ?? "").trim().toLowerCase();
+  if (type === "pending_usage") {
+    return true;
   }
   const amount = Number(item.totalAmount);
   return Number.isFinite(amount) && amount !== 0;
+}
+
+function billingHistoryKind(invoiceType: string | undefined): string {
+  const type = (invoiceType ?? "").trim().toLowerCase();
+  if (type === "pending_usage") return "Unbilled usage";
+  if (type === "auto_topup" || type === "payment") return "Payment";
+  return "Invoice";
 }
 
 function formatInvoiceAmount(totalAmount: string, currency: string): string {
@@ -94,10 +201,12 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [credits, setCredits] = useState<CreditBalance | null>(null);
+  const [autoTopUp, setAutoTopUp] = useState<AutoTopUp | null>(null);
+  const [autoTopUpAmount, setAutoTopUpAmount] = useState(DEFAULT_AUTO_TOP_UP_AMOUNT);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
-  const [amountInput, setAmountInput] = useState("10");
-  const [busy, setBusy] = useState<"topup" | "pm" | "test-usage" | string | null>(
+  const [amountInput, setAmountInput] = useState(String(DEFAULT_TOP_UP_USD));
+  const [busy, setBusy] = useState<"topup" | "pm" | "test-usage" | "autotopup" | string | null>(
     null,
   );
 
@@ -115,8 +224,14 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
         const body = (await walletRes.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error || "Failed to load billing");
       }
-      const wallet = (await walletRes.json()) as { credits: CreditBalance };
+      const wallet = (await walletRes.json()) as {
+        credits: CreditBalance;
+        autoTopUp?: AutoTopUp | null;
+      };
       setCredits(wallet.credits);
+      const prefs = wallet.autoTopUp ?? null;
+      setAutoTopUp(prefs);
+      setAutoTopUpAmount(normalizedAutoTopUpAmount(prefs?.amountUsd));
 
       if (invRes.ok) {
         const inv = (await invRes.json()) as { items?: Invoice[] };
@@ -228,6 +343,50 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
     }
   }
 
+  async function onSaveAutoTopUp(enabled: boolean, amountInput: string) {
+    const parsed = parseTopUpAmountUsd(amountInput);
+    let amount: number;
+    if (parsed.ok) {
+      amount = parsed.amount;
+    } else if (!enabled) {
+      const fallback = parseTopUpAmountUsd(autoTopUp?.amountUsd ?? DEFAULT_AUTO_TOP_UP_AMOUNT);
+      amount = fallback.ok ? fallback.amount : DEFAULT_TOP_UP_USD;
+    } else {
+      setError(parsed.error);
+      return;
+    }
+    setBusy("autotopup");
+    setError(null);
+    try {
+      const res = await fetch("/api/pymthouse/wallet", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          externalUserId,
+          enabled,
+          amountUsd: amount,
+        }),
+      });
+      const data = (await res.json()) as {
+        autoTopUp?: AutoTopUp;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(data.error || "Could not save auto top-up");
+      const prefs = data.autoTopUp ?? { enabled, amountUsd: amount.toFixed(2) };
+      setAutoTopUp(prefs);
+      setAutoTopUpAmount(normalizedAutoTopUpAmount(prefs.amountUsd));
+      setFlash(
+        prefs.enabled
+          ? `Auto top-up on — adds $${prefs.amountUsd ?? amount} when credit hits $0.`
+          : "Auto top-up off.",
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save auto top-up");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function onAddCard() {
     setBusy("pm");
     setError(null);
@@ -248,7 +407,9 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
   }
 
   async function openInvoice(invoice: Invoice) {
-    if (invoice.invoiceType === "auto_topup") return;
+    if (invoice.invoiceType === "auto_topup" || invoice.invoiceType === "pending_usage") {
+      return;
+    }
     setBusy(invoice.id);
     setError(null);
     try {
@@ -298,16 +459,17 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
   const pendingNum = credits ? Number(credits.pending) : 0;
   const hasCredit = Number.isFinite(liveNum) && liveNum > 0;
   const hasPendingGrants = Number.isFinite(pendingNum) && pendingNum > 0;
-  const defaultPm =
-    paymentMethods.find((pm) => pm.isDefault) ?? paymentMethods[0] ?? null;
+  const defaultPm = paymentMethods.find((pm) => pm.isDefault) ?? paymentMethods[0] ?? null;
   const parsedAmount = parseTopUpAmountUsd(amountInput);
+  const parsedAutoTopUpAmount = parseTopUpAmountUsd(autoTopUpAmount);
   const amountLabel = parsedAmount.ok
     ? formatTopUpUsdLabel(parsedAmount.amount)
     : amountInput.trim() || "…";
   const amountInvalid = amountInput.trim() !== "" && !parsedAmount.ok;
-  const amountDisabled =
-    busy === "topup" || busy === "test-usage" || !parsedAmount.ok;
-  const stripeHistory = invoices.filter(isCollectedStripeHistoryItem);
+  const amountDisabled = busy === "topup" || busy === "test-usage" || !parsedAmount.ok;
+  const autoTopUpKnown = autoTopUp !== null;
+  const autoTopUpBusy = busy === "autotopup" || !autoTopUpKnown;
+  const stripeHistory = invoices.filter(isVisibleBillingHistoryItem);
 
   return (
     <div className="space-y-6">
@@ -337,42 +499,25 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
               </span>
             </div>
             <p className="mt-1 text-sm text-muted">
-              Live is spendable credit after open charges. Settled is the
-              committed ledger. Balances are {currency} and are not merged
-              across currencies.
+              Spendable credit after open charges. Balances are {currency} and are not merged across
+              currencies.
             </p>
 
-            <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <div>
-                <p className="font-mono text-[10px] uppercase tracking-wide text-faint">
-                  Live
-                </p>
-                <p
-                  className={`mt-1 font-mono text-3xl tabular-nums ${
-                    hasCredit ? "text-fg" : "text-billing-warn"
-                  }`}
-                >
-                  {formatCreditUsd(credits.live, currency)}
-                </p>
-                <p className="mt-1 text-xs text-muted">Can spend</p>
-              </div>
-              <div>
-                <p className="font-mono text-[10px] uppercase tracking-wide text-faint">
-                  Settled
-                </p>
-                <p className="mt-1 font-mono text-3xl tabular-nums text-fg">
-                  {formatCreditUsd(credits.settled, currency)}
-                </p>
-                <p className="mt-1 text-xs text-muted">Committed ledger</p>
-              </div>
+            <div className="mt-5">
+              <p className="font-mono text-[10px] uppercase tracking-wide text-faint">Live</p>
+              <p
+                className={`mt-1 font-mono text-3xl tabular-nums ${
+                  hasCredit ? "text-fg" : "text-billing-warn"
+                }`}
+              >
+                {formatCreditUsd(credits.live, currency)}
+              </p>
+              <p className="mt-1 text-xs text-muted">Can spend</p>
             </div>
             {hasPendingGrants ? (
               <p className="mt-3 font-mono text-xs text-faint">
-                Pending grants {formatCreditUsd(credits.pending, currency)} (not
-                spendable yet)
-                {credits.retrievedAt
-                  ? ` · ${new Date(credits.retrievedAt).toLocaleString()}`
-                  : ""}
+                Pending grants {formatCreditUsd(credits.pending, currency)} (not spendable yet)
+                {credits.retrievedAt ? ` · ${new Date(credits.retrievedAt).toLocaleString()}` : ""}
               </p>
             ) : credits.retrievedAt ? (
               <p className="mt-3 font-mono text-xs text-faint">
@@ -385,64 +530,20 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
         )}
 
         <div className="mt-5 space-y-3 border-t border-border pt-4">
-          <div className="flex flex-wrap items-end gap-2">
-            {QUICK_AMOUNTS.map((n) => (
-              <button
-                key={n}
-                type="button"
-                onClick={() => setAmountInput(String(n))}
-                className={`rounded-md border px-3 py-1.5 font-mono text-xs tabular-nums ${
-                  parsedAmount.ok && parsedAmount.amount === n
-                    ? "border-live bg-live-dim text-live"
-                    : "border-border text-muted hover:border-border-strong hover:text-fg"
-                }`}
-              >
-                ${n}
-              </button>
-            ))}
-            <label htmlFor="topup-amount" className="relative inline-flex items-center">
-              <span className="sr-only">Custom amount in dollars</span>
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute left-2.5 font-mono text-xs text-muted"
-              >
-                $
-              </span>
-              <input
-                id="topup-amount"
-                inputMode="decimal"
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="1.00"
-                aria-invalid={amountInvalid}
-                aria-describedby="topup-amount-hint"
-                value={amountInput}
-                onChange={(e) =>
-                  setAmountInput(sanitizeTopUpAmountInput(e.target.value))
-                }
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    void onTopUp();
-                  }
-                }}
-                className={`h-7.5 w-28 rounded-md border bg-elevated py-1.5 pl-6 pr-2 font-mono text-xs tabular-nums text-fg outline-none placeholder:text-faint focus-visible:ring-1 focus-visible:ring-live/30 ${
-                  amountInvalid
-                    ? "border-billing-block"
-                    : parsedAmount.ok &&
-                        !QUICK_AMOUNTS.some((n) => n === parsedAmount.amount)
-                      ? "border-live bg-live-dim text-live"
-                      : "border-border"
-                }`}
-              />
-            </label>
-          </div>
+          <AmountQuickPick
+            inputId="topup-amount"
+            label="Custom amount in dollars"
+            placeholder="1.00"
+            amounts={QUICK_AMOUNTS}
+            value={amountInput}
+            parsed={parsedAmount}
+            invalid={amountInvalid}
+            describedBy="topup-amount-hint"
+            onChange={setAmountInput}
+            onEnter={() => void onTopUp()}
+          />
           <div className="flex flex-wrap gap-3">
-            <Button
-              type="button"
-              onClick={() => void onTopUp()}
-              disabled={amountDisabled}
-            >
+            <Button type="button" onClick={() => void onTopUp()} disabled={amountDisabled}>
               {busy === "topup" ? "Starting…" : `Add $${amountLabel} credit`}
             </Button>
             <Button
@@ -451,9 +552,7 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
               onClick={() => void onTestUsage()}
               disabled={amountDisabled}
             >
-              {busy === "test-usage"
-                ? "Sending usage…"
-                : `Test usage $${amountLabel}`}
+              {busy === "test-usage" ? "Sending usage…" : `Test usage $${amountLabel}`}
             </Button>
           </div>
         </div>
@@ -490,27 +589,68 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
         )}
       </section>
 
+      <section className="rounded-lg border border-border bg-surface p-5">
+        <h3 className="text-base font-semibold text-fg">Auto top-up</h3>
+        <p className="mt-1 text-sm text-muted">
+          When live credit hits $0, charge your saved card and add credit so generation can
+          continue.
+        </p>
+        <label className="mt-4 flex items-center gap-2 text-sm text-fg">
+          <input
+            type="checkbox"
+            checked={autoTopUp?.enabled ?? false}
+            disabled={autoTopUpBusy || (!defaultPm && !autoTopUp?.enabled)}
+            onChange={(e) => {
+              const next = e.target.checked;
+              if (next && !defaultPm) {
+                setError("Add a card before enabling auto top-up.");
+                return;
+              }
+              void onSaveAutoTopUp(next, autoTopUpAmount);
+            }}
+          />
+          Enable auto top-up
+        </label>
+        <div className="mt-3">
+          <AmountQuickPick
+            inputId="autotopup-amount"
+            label="Auto top-up amount in dollars"
+            placeholder="10.00"
+            amounts={AUTO_TOP_UP_AMOUNTS}
+            value={autoTopUpAmount}
+            parsed={parsedAutoTopUpAmount}
+            disabled={autoTopUpBusy}
+            onChange={setAutoTopUpAmount}
+            onCommit={
+              autoTopUp?.enabled && defaultPm
+                ? (next) => void onSaveAutoTopUp(true, next)
+                : undefined
+            }
+          />
+        </div>
+        <p className="mt-2 text-xs text-faint">
+          {!autoTopUpKnown
+            ? "Auto top-up settings unavailable. Refresh billing to try again."
+            : defaultPm
+              ? `Reloads $${parsedAutoTopUpAmount.ok ? formatTopUpUsdLabel(parsedAutoTopUpAmount.amount) : "…"} when spendable credit is empty. Min $${TOP_UP_MIN_USD} · max $${TOP_UP_MAX_USD.toLocaleString()}.`
+              : "Add a card to enable auto top-up."}
+        </p>
+      </section>
+
       <section>
         <h3 className="text-base font-semibold text-fg">Billing history</h3>
-        <p className="mt-1 text-xs text-faint">
-          Stripe invoices and payments for this user.
-        </p>
+        <p className="mt-1 text-xs text-faint">Stripe invoices and payments for this user.</p>
         {stripeHistory.length > 0 ? (
           <ul className="mt-3 divide-y divide-border rounded-lg border border-border">
             {stripeHistory.slice(0, 20).map((inv) => {
-              const kind =
-                inv.invoiceType === "auto_topup" || inv.invoiceType === "payment"
-                  ? "Payment"
-                  : "Invoice";
+              const kind = billingHistoryKind(inv.invoiceType);
               return (
                 <li
                   key={inv.id}
                   className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm"
                 >
                   <div className="min-w-0">
-                    <p className="font-mono text-xs text-fg">
-                      {inv.number ?? inv.id}
-                    </p>
+                    <p className="font-mono text-xs text-fg">{inv.number ?? inv.id}</p>
                     <p className="text-xs text-faint">
                       {formatInvoiceDate(inv.issuedAt ?? inv.periodEnd)} · {kind}
                       {inv.status ? ` · ${inv.status}` : ""}
@@ -520,8 +660,7 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
                     <span className="font-mono tabular-nums text-fg">
                       {formatInvoiceAmount(inv.totalAmount, inv.currency)}
                     </span>
-                    {inv.invoiceType === "stripe_connect" ||
-                    inv.invoiceType === undefined ? (
+                    {inv.invoiceType === "stripe_connect" || inv.invoiceType === undefined ? (
                       <button
                         type="button"
                         onClick={() => void openInvoice(inv)}
