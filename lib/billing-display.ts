@@ -49,24 +49,34 @@ export function spendPostureBadge(status: BillingStatus): {
   }
 }
 
+type BillingStateFunding = BillingState["funding"] & {
+  /** Signed spendable − deduped debt. Present on current PymtHouse. */
+  net?: { usdMicros?: string };
+};
+
 /**
  * Signed runway for the Available figure.
  *
- * While prepaid/included remain, runway is spendable — gathering invoice
- * totals can still list prepaid-covered usage under credit_then_invoice and
- * must not be subtracted again. Once spendable is exhausted, runway is the
- * negative of unbilled overage debt.
+ * Prefer PymtHouse `funding.net` (already nets prepaid/included and
+ * already-paid invoices). Do not re-subtract unbilledDebt on top of that —
+ * that is what made a red balance look like the whole cycle was still owed.
  */
 export function availableRunway(state: BillingState): {
   usd: string;
   tone: SpendPostureTone;
   detail: string | null;
 } {
-  const included = parseUsdMicros(state.funding.included.usdMicros);
-  const prepaid = parseUsdMicros(state.funding.prepaid.usdMicros);
-  const spendable = parseUsdMicros(state.funding.spendable.usdMicros);
-  const debt = parseUsdMicros(state.funding.overage.unbilledDebt?.usdMicros);
-  const available = spendable > BigInt(0) ? spendable : -debt;
+  const funding = state.funding as BillingStateFunding;
+  const included = parseUsdMicros(funding.included.usdMicros);
+  const prepaid = parseUsdMicros(funding.prepaid.usdMicros);
+  const spendable = parseUsdMicros(funding.spendable.usdMicros);
+  const debt = parseUsdMicros(funding.overage.unbilledDebt?.usdMicros);
+  const available =
+    funding.net?.usdMicros != null
+      ? parseUsdMicros(funding.net.usdMicros)
+      : spendable > BigInt(0)
+        ? spendable
+        : -debt;
 
   let tone: SpendPostureTone = "ok";
   if (available < BigInt(0)) {
@@ -105,21 +115,32 @@ type LedgerAmountRow = {
   type: string;
   amountUsdMicros: string;
   creditDeltaUsdMicros: string;
+  status?: string | null;
 };
 
 function absMicros(value: bigint): bigint {
   return value < BigInt(0) ? -value : value;
 }
 
+/** Synthetic PymtHouse row for accrued usage that is not a collected invoice. */
+export function isPendingUsageRow(entry: LedgerAmountRow): boolean {
+  return (
+    entry.type === "invoice" &&
+    (entry.status ?? "").trim().toLowerCase() === "pending"
+  );
+}
+
 /**
- * Prepaid drawdowns plus collected invoices — what was billed this cycle,
- * not gross meter (which still includes plan-included usage).
+ * Prepaid drawdowns plus collected invoices — what was billed this cycle.
+ * Pending / not-yet-invoiced rows are the same cycle meter PymtHouse already
+ * used for unbilled debt; counting them here double-counts paid usage.
  */
 export function sumLedgerBilledUsageUsdMicros(
   entries: ReadonlyArray<LedgerAmountRow>,
 ): bigint {
   let total = BigInt(0);
   for (const entry of entries) {
+    if (isPendingUsageRow(entry)) continue;
     if (entry.type === "usage") {
       total += absMicros(parseUsdMicros(entry.creditDeltaUsdMicros));
     } else if (entry.type === "invoice") {
@@ -163,6 +184,18 @@ export function formatInvoiceDate(iso: string | undefined): string {
     month: "short",
     day: "numeric",
   });
+}
+
+/** Stripe Connect charges/invoices — not the synthetic pending-usage estimate. */
+export function isCollectedStripeHistoryItem(item: {
+  invoiceType?: string;
+  totalAmount: string;
+}): boolean {
+  if ((item.invoiceType ?? "").trim().toLowerCase() === "pending_usage") {
+    return false;
+  }
+  const amount = Number(item.totalAmount);
+  return Number.isFinite(amount) && amount !== 0;
 }
 
 export function formatInvoiceAmount(totalAmount: string, currency: string): string {

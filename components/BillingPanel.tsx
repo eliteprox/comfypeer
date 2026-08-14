@@ -10,6 +10,7 @@ import {
   formatInvoiceDate,
   formatSignedWalletUsd,
   isBillingHistoryRow,
+  isCollectedStripeHistoryItem,
   ledgerHistorySignedUsdMicros,
   spendPostureBadge,
   sumLedgerBilledUsageUsdMicros,
@@ -306,6 +307,7 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
   const amountDisabled =
     busy === "topup" || busy === "test-usage" || !parsedAmount.ok;
   const history = ledger.filter(isBillingHistoryRow);
+  const stripeHistory = invoices.filter(isCollectedStripeHistoryItem);
 
   return (
     <div className="space-y-6">
@@ -473,9 +475,51 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
       <section>
         <h3 className="text-base font-semibold text-fg">Billing history</h3>
         <p className="mt-1 text-xs text-faint">
-          Prepaid credits and collected invoices. Plan-included usage is omitted.
+          Stripe invoices and payments for this user. Prepaid ledger rows are
+          a fallback when Connect history has not loaded.
         </p>
-        {history.length > 0 ? (
+        {stripeHistory.length > 0 ? (
+          <ul className="mt-3 divide-y divide-border rounded-lg border border-border">
+            {stripeHistory.slice(0, 20).map((inv) => {
+              const kind =
+                inv.invoiceType === "auto_topup" || inv.invoiceType === "payment"
+                  ? "Payment"
+                  : "Invoice";
+              return (
+                <li
+                  key={inv.id}
+                  className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm"
+                >
+                  <div className="min-w-0">
+                    <p className="font-mono text-xs text-fg">
+                      {inv.number ?? inv.id}
+                    </p>
+                    <p className="text-xs text-faint">
+                      {formatInvoiceDate(inv.issuedAt ?? inv.periodEnd)} · {kind}
+                      {inv.status ? ` · ${inv.status}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono tabular-nums text-fg">
+                      {formatInvoiceAmount(inv.totalAmount, inv.currency)}
+                    </span>
+                    {inv.invoiceType === "stripe_connect" ||
+                    inv.invoiceType === undefined ? (
+                      <button
+                        type="button"
+                        onClick={() => void openInvoice(inv)}
+                        disabled={busy === inv.id}
+                        className="text-xs text-cool hover:underline disabled:opacity-50"
+                      >
+                        {busy === inv.id ? "…" : "View"}
+                      </button>
+                    ) : null}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        ) : history.length > 0 ? (
           <ul className="mt-3 divide-y divide-border rounded-lg border border-border">
             {history.slice(0, 20).map((entry) => {
               const signedMicros = ledgerHistorySignedUsdMicros(entry);
@@ -513,40 +557,6 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
                 </li>
               );
             })}
-          </ul>
-        ) : invoices.length > 0 && ledger.length === 0 ? (
-          <ul className="mt-3 divide-y divide-border rounded-lg border border-border">
-            {invoices.map((inv) => (
-              <li
-                key={inv.id}
-                className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm"
-              >
-                <div className="min-w-0">
-                  <p className="font-mono text-xs text-fg">
-                    {inv.number ?? inv.id}
-                  </p>
-                  <p className="text-xs text-faint">
-                    {formatInvoiceDate(inv.issuedAt ?? inv.periodEnd)} ·{" "}
-                    {inv.invoiceType === "auto_topup" ? "top-up" : inv.status}
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="font-mono tabular-nums text-fg">
-                    {formatInvoiceAmount(inv.totalAmount, inv.currency)}
-                  </span>
-                  {inv.invoiceType !== "auto_topup" ? (
-                    <button
-                      type="button"
-                      onClick={() => void openInvoice(inv)}
-                      disabled={busy === inv.id}
-                      className="text-xs text-cool hover:underline disabled:opacity-50"
-                    >
-                      {busy === inv.id ? "…" : "View"}
-                    </button>
-                  ) : null}
-                </div>
-              </li>
-            ))}
           </ul>
         ) : (
           <p className="mt-2 text-sm text-muted">No billing activity yet.</p>
