@@ -6,21 +6,13 @@ export function LogoMark({ size = 28 }: { size?: number }) {
     <svg
       width={size}
       height={size}
-      viewBox="0 0 32 32"
+      viewBox="0 0 64 64"
       fill="none"
       aria-hidden
       className="shrink-0"
     >
-      <circle cx="8" cy="16" r="5" stroke="var(--color-cool)" strokeWidth="2" fill="var(--color-cool-dim)" />
-      <circle cx="24" cy="16" r="5" stroke="var(--color-live)" strokeWidth="2" fill="var(--color-live-dim)" />
-      <path
-        d="M13 16 C16 10, 16 22, 19 16"
-        stroke="var(--color-live)"
-        strokeWidth="2"
-        fill="none"
-        strokeLinecap="round"
-        className="edge-flow"
-      />
+      <circle cx="24" cy="32" r="18" fill="var(--color-cool)" fillOpacity="0.9" />
+      <circle cx="40" cy="32" r="18" fill="var(--color-live)" fillOpacity="0.82" />
     </svg>
   );
 }

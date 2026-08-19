@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-label="ComfyPeer">
+  <!-- Two overlapping peer nodes: cool structure + live accent -->
+  <circle cx="24" cy="32" r="18" fill="#6B8CFF" fill-opacity="0.9"/>
+  <circle cx="40" cy="32" r="18" fill="#3DFF9A" fill-opacity="0.82"/>
+</svg>
