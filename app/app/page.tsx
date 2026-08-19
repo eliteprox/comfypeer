@@ -79,7 +79,6 @@ export default function StudioPage() {
             type="button"
             onClick={() => {
               signOut();
-              router.push("/");
             }}
             className="mt-2 inline-flex items-center gap-1.5 text-xs text-faint hover:text-fg"
           >

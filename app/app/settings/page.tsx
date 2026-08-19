@@ -127,7 +127,6 @@ export default function SettingsPage() {
           className="text-sm text-muted hover:text-fg"
           onClick={() => {
             signOut();
-            router.push("/");
           }}
         >
           Sign out

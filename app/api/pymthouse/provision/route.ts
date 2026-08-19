@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth0 } from "@/lib/auth0";
 import { externalUserIdFromEmail } from "@/lib/external-user-id";
 import { ensureAppUserProvisioned, PmtHouseError } from "@/lib/pymthouse";
 import { sessionSecretConfigured, setSessionCookie } from "@/lib/session";
@@ -36,12 +37,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid request origin" }, { status: 403 });
   }
   try {
-    const body = (await request.json()) as {
-      email?: string;
-    };
-    const email = body.email?.trim().toLowerCase() || "";
+    const session = await auth0.getSession();
+    const email = session?.user?.email?.trim().toLowerCase() || "";
     if (!email.includes("@")) {
-      return NextResponse.json({ error: "email is required" }, { status: 400 });
+      return NextResponse.json({ error: "Sign in required" }, { status: 401 });
     }
     const externalUserId = externalUserIdFromEmail(email);
     await ensureAppUserProvisioned(externalUserId, email);
