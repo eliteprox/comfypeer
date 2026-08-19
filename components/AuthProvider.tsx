@@ -9,6 +9,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useUser } from "@auth0/nextjs-auth0/client";
+import { isValidEmail } from "@/lib/email";
 
 export type ComfyUser = {
   id: string;
@@ -19,77 +21,134 @@ export type ComfyUser = {
 type AuthContextValue = {
   user: ComfyUser | null;
   ready: boolean;
-  signIn: (email: string, name?: string) => Promise<void>;
-  signOut: () => void;
+  /** Auth0 session exists but the profile has no email claim. */
+  missingEmail: boolean;
+  signOut: () => Promise<void>;
 };
 
 const STORAGE_KEY = "comfypeer-user";
 
-export async function externalUserIdFromEmail(email: string): Promise<string> {
-  const normalized = email.trim().toLowerCase() || "demo@comfypeer.com";
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(`comfypeer:externalUserId:${normalized}`),
-  );
-  const hex = Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-  return `eu_${hex.slice(0, 32)}`;
-}
-
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function displayNameFrom(email: string, preferredName?: string): string {
+  const trimmed = preferredName?.trim();
+  if (trimmed) return trimmed;
+  return email.split("@")[0] || "User";
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const { user: auth0User, isLoading } = useUser();
   const [user, setUser] = useState<ComfyUser | null>(null);
   const [ready, setReady] = useState(false);
+  const [missingEmail, setMissingEmail] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      if (isLoading) return;
+
+      if (!auth0User) {
+        localStorage.removeItem(STORAGE_KEY);
+        await fetch("/api/session", { method: "DELETE" }).catch(() => null);
+        if (!cancelled) {
+          setUser(null);
+          setMissingEmail(false);
+          setReady(true);
+        }
+        return;
+      }
+
+      const email = auth0User.email?.trim().toLowerCase() || "";
+      if (!isValidEmail(email)) {
+        localStorage.removeItem(STORAGE_KEY);
+        await fetch("/api/session", { method: "DELETE" }).catch(() => null);
+        if (!cancelled) {
+          setUser(null);
+          setMissingEmail(true);
+          setReady(true);
+        }
+        return;
+      }
+
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const next = JSON.parse(raw) as ComfyUser;
-          if (!cancelled) setUser(next);
-          await fetch("/api/session", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email: next.email }),
-          }).catch(() => null);
+        const provisionRes = await fetch("/api/pymthouse/provision", {
+          method: "POST",
+        });
+        if (!provisionRes.ok) {
+          localStorage.removeItem(STORAGE_KEY);
+          if (!cancelled) {
+            setUser(null);
+            setMissingEmail(false);
+          }
+          return;
+        }
+        const provisioned = (await provisionRes.json()) as {
+          externalUserId?: string;
+          email?: string;
+        };
+        if (!provisioned.externalUserId || !provisioned.email) {
+          localStorage.removeItem(STORAGE_KEY);
+          if (!cancelled) {
+            setUser(null);
+            setMissingEmail(false);
+          }
+          return;
+        }
+
+        let storedName: string | undefined;
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) {
+            const stored = JSON.parse(raw) as ComfyUser;
+            if (stored.id === provisioned.externalUserId) {
+              storedName = stored.name;
+            }
+          }
+        } catch {
+          /* ignore corrupt local profile */
+        }
+
+        const next: ComfyUser = {
+          id: provisioned.externalUserId,
+          email: provisioned.email,
+          name: displayNameFrom(provisioned.email, auth0User.name?.trim() || storedName),
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        if (!cancelled) {
+          setUser(next);
+          setMissingEmail(false);
         }
       } catch {
-        /* ignore */
+        localStorage.removeItem(STORAGE_KEY);
+        if (!cancelled) {
+          setUser(null);
+          setMissingEmail(false);
+        }
+      } finally {
+        if (!cancelled) setReady(true);
       }
-      if (!cancelled) setReady(true);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [auth0User, isLoading]);
 
-  const signIn = useCallback(async (email: string, name?: string) => {
-    const id = await externalUserIdFromEmail(email);
-    const next: ComfyUser = {
-      id,
-      email: email.trim().toLowerCase(),
-      name: name?.trim() || email.split("@")[0] || "User",
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    setUser(next);
-    await fetch("/api/pymthouse/provision", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: next.email }),
-    }).catch(() => null);
-  }, []);
-
-  const signOut = useCallback(() => {
+  const signOut = useCallback(async () => {
     localStorage.removeItem(STORAGE_KEY);
     setUser(null);
-    void fetch("/api/session", { method: "DELETE" }).catch(() => null);
+    setMissingEmail(false);
+    try {
+      await fetch("/api/session", { method: "DELETE" });
+    } catch {
+      /* ignore */
+    }
+    window.location.assign("/auth/logout?returnTo=/");
   }, []);
 
-  const value = useMemo(() => ({ user, ready, signIn, signOut }), [user, ready, signIn, signOut]);
+  const value = useMemo(
+    () => ({ user, ready, missingEmail, signOut }),
+    [user, ready, missingEmail, signOut],
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -9,6 +9,7 @@ import {
   type AppUserInvoiceHostedUrlResult,
   type AppUserPaymentMethod,
 } from "@pymthouse/builder-sdk";
+import { appBaseUrl } from "@/lib/app-url";
 
 function readPymthouseM2mConfig() {
   const issuerUrl = process.env.PYMTHOUSE_ISSUER_URL?.trim();
@@ -195,10 +196,6 @@ function m2mAuthHeader(): string {
     });
   }
   return `Basic ${Buffer.from(`${id}:${secret}`).toString("base64")}`;
-}
-
-function appUrl(): string {
-  return process.env.NEXT_PUBLIC_APP_URL?.trim() || "http://localhost:3000";
 }
 
 export function isUserNotFoundError(error: unknown): boolean {
@@ -394,8 +391,8 @@ export async function startPaymentMethodCheckout(externalUserId: string) {
   const client = createPmtHouseClient();
   return client.createUserPaymentMethodCheckout({
     externalUserId,
-    successUrl: `${appUrl()}/app/settings?topup=pm-saved`,
-    cancelUrl: `${appUrl()}/app/settings?topup=canceled`,
+    successUrl: `${appBaseUrl()}/app/settings?topup=pm-saved`,
+    cancelUrl: `${appBaseUrl()}/app/settings?topup=canceled`,
   });
 }
 
@@ -422,8 +419,8 @@ export async function startWalletTopUp(externalUserId: string, amountUsd: number
       body: JSON.stringify({
         amountUsd: amountUsd.toFixed(2),
         externalUserId,
-        successUrl: `${appUrl()}/app/settings?topup=succeeded`,
-        cancelUrl: `${appUrl()}/app/settings?topup=canceled`,
+        successUrl: `${appBaseUrl()}/app/settings?topup=succeeded`,
+        cancelUrl: `${appBaseUrl()}/app/settings?topup=canceled`,
       }),
       cache: "no-store",
     },

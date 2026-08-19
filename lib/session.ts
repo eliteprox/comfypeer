@@ -1,8 +1,13 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { isValidEmail } from "@/lib/email";
 
-export const SESSION_COOKIE = "comfypeer_session";
+/** `__Host-` prefix requires Secure, Path=/, and no Domain. */
+export const SESSION_COOKIE = "__Host-comfypeer_session";
 const SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 30;
+/** Bump to invalidate every issued session cookie. Must not contain `.`. */
+const SESSION_VERSION = "1";
+const EXTERNAL_USER_ID_PATTERN = /^eu_[0-9a-f]{32}$/;
 
 function sessionSecret(): string | null {
   return process.env.COMFYPEER_SESSION_SECRET?.trim() || null;
@@ -12,9 +17,27 @@ export function sessionSecretConfigured(): boolean {
   return sessionSecret() !== null;
 }
 
-function signSession(externalUserId: string, expiresAtSec: number, secret: string): string {
+function encodeEmail(email: string): string {
+  return Buffer.from(email, "utf8").toString("base64url");
+}
+
+function decodeEmail(encoded: string): string | null {
+  try {
+    const email = Buffer.from(encoded, "base64url").toString("utf8").trim().toLowerCase();
+    return isValidEmail(email) ? email : null;
+  } catch {
+    return null;
+  }
+}
+
+function signSession(
+  externalUserId: string,
+  expiresAtSec: number,
+  emailEnc: string,
+  secret: string,
+): string {
   return createHmac("sha256", secret)
-    .update(`${externalUserId}.${expiresAtSec}`)
+    .update(`${SESSION_VERSION}.${externalUserId}.${expiresAtSec}.${emailEnc}`)
     .digest("base64url");
 }
 
@@ -22,7 +45,7 @@ function cookieOptions(maxAge: number) {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: process.env.NODE_ENV === "production",
+    secure: true,
     path: "/",
     maxAge,
   };
@@ -30,17 +53,34 @@ function cookieOptions(maxAge: number) {
 
 export type SessionCookieResult = { ok: true } | { ok: false; error: string };
 
+export type SessionPrincipal = {
+  externalUserId: string;
+  email: string;
+};
+
 export function setSessionCookie(
   response: NextResponse,
   externalUserId: string,
+  email: string,
 ): SessionCookieResult {
   const secret = sessionSecret();
   if (!secret) {
     return { ok: false, error: "COMFYPEER_SESSION_SECRET is not configured" };
   }
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!isValidEmail(normalizedEmail)) {
+    return { ok: false, error: "email is required to establish a session" };
+  }
+  if (!EXTERNAL_USER_ID_PATTERN.test(externalUserId)) {
+    return { ok: false, error: "invalid externalUserId" };
+  }
   const expiresAtSec = Math.floor(Date.now() / 1000) + SESSION_MAX_AGE_SEC;
-  const mac = signSession(externalUserId, expiresAtSec, secret);
-  const token = `${externalUserId}.${expiresAtSec}.${mac}`;
+  const emailEnc = encodeEmail(normalizedEmail);
+  const mac = signSession(externalUserId, expiresAtSec, emailEnc, secret);
+  const token = `${externalUserId}.${expiresAtSec}.${emailEnc}.${mac}`;
+  if (token.split(".").length !== 4) {
+    return { ok: false, error: "invalid session fields" };
+  }
   response.cookies.set(SESSION_COOKIE, token, cookieOptions(SESSION_MAX_AGE_SEC));
   return { ok: true };
 }
@@ -49,22 +89,33 @@ export function clearSessionCookie(response: NextResponse): void {
   response.cookies.set(SESSION_COOKIE, "", cookieOptions(0));
 }
 
-export function sessionUserIdFromRequest(request: NextRequest): string | null {
+export function sessionFromRequest(request: NextRequest): SessionPrincipal | null {
   const secret = sessionSecret();
   const raw = request.cookies.get(SESSION_COOKIE)?.value ?? "";
   const parts = raw.split(".");
-  if (!secret || parts.length !== 3) return null;
-  const [externalUserId, expiresAtRaw, mac] = parts;
+  if (!secret || parts.length !== 4) return null;
+  const [externalUserId, expiresAtRaw, emailEnc, mac] = parts;
   const expiresAtSec = Number(expiresAtRaw);
-  if (!externalUserId || !mac || !Number.isFinite(expiresAtSec) || expiresAtSec <= 0) {
+  const email = emailEnc ? decodeEmail(emailEnc) : null;
+  if (
+    !EXTERNAL_USER_ID_PATTERN.test(externalUserId) ||
+    !mac ||
+    !email ||
+    !Number.isFinite(expiresAtSec) ||
+    expiresAtSec <= 0
+  ) {
     return null;
   }
   if (Math.floor(Date.now() / 1000) > expiresAtSec) return null;
-  const expected = signSession(externalUserId, expiresAtSec, secret);
+  const expected = signSession(externalUserId, expiresAtSec, emailEnc, secret);
   const left = Buffer.from(mac);
   const right = Buffer.from(expected);
   if (left.length !== right.length || !timingSafeEqual(left, right)) return null;
-  return externalUserId;
+  return { externalUserId, email };
+}
+
+export function sessionUserIdFromRequest(request: NextRequest): string | null {
+  return sessionFromRequest(request)?.externalUserId ?? null;
 }
 
 export function requireSessionUserId(

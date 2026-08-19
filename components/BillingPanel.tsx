@@ -466,6 +466,7 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
     ? formatTopUpUsdLabel(parsedAmount.amount)
     : amountInput.trim() || "…";
   const amountInvalid = amountInput.trim() !== "" && !parsedAmount.ok;
+  const autoTopUpAmountInvalid = Boolean(autoTopUp?.enabled && !parsedAutoTopUpAmount.ok);
   const amountDisabled = busy === "topup" || busy === "test-usage" || !parsedAmount.ok;
   const autoTopUpKnown = autoTopUp !== null;
   const autoTopUpBusy = busy === "autotopup" || !autoTopUpKnown;
@@ -620,6 +621,8 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
             value={autoTopUpAmount}
             parsed={parsedAutoTopUpAmount}
             disabled={autoTopUpBusy}
+            invalid={autoTopUpAmountInvalid}
+            describedBy="autotopup-amount-hint"
             onChange={setAutoTopUpAmount}
             onCommit={
               autoTopUp?.enabled && defaultPm
@@ -628,12 +631,17 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
             }
           />
         </div>
-        <p className="mt-2 text-xs text-faint">
+        <p
+          id="autotopup-amount-hint"
+          className={`mt-2 text-xs ${autoTopUpAmountInvalid ? "text-billing-block" : "text-faint"}`}
+        >
           {!autoTopUpKnown
             ? "Auto top-up settings unavailable. Refresh billing to try again."
-            : defaultPm
-              ? `Reloads $${parsedAutoTopUpAmount.ok ? formatTopUpUsdLabel(parsedAutoTopUpAmount.amount) : "…"} when spendable credit is empty. Min $${TOP_UP_MIN_USD} · max $${TOP_UP_MAX_USD.toLocaleString()}.`
-              : "Add a card to enable auto top-up."}
+            : autoTopUp?.enabled && !parsedAutoTopUpAmount.ok
+              ? parsedAutoTopUpAmount.error
+              : defaultPm
+                ? `Reloads $${parsedAutoTopUpAmount.ok ? formatTopUpUsdLabel(parsedAutoTopUpAmount.amount) : "…"} when spendable credit is empty. Min $${TOP_UP_MIN_USD} · max $${TOP_UP_MAX_USD.toLocaleString()}.`
+                : "Add a card to enable auto top-up."}
         </p>
       </section>
 

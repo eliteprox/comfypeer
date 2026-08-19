@@ -19,18 +19,37 @@ cp .env.example .env.local   # fill staging creds
 pnpm dev
 ```
 
+`NEXT_PUBLIC_APP_URL` must be the public origin (scheme + host, no path), e.g.
+`http://localhost:3000` or `https://comfypeer.example`. Browser session
+provisioning rejects the request when this value is missing or not a valid URL.
+
 ## Scripts
 
-| Command | Purpose |
-|---|---|
-| `pnpm dev` | Local server |
-| `pnpm build` | Production build |
-| `pnpm typecheck` | `tsc --noEmit` |
-| `pnpm lint` | ESLint (zero warnings) |
+| Command          | Purpose                |
+| ---------------- | ---------------------- |
+| `pnpm dev`       | Local server           |
+| `pnpm build`     | Production build       |
+| `pnpm typecheck` | `tsc --noEmit`         |
+| `pnpm lint`      | ESLint (zero warnings) |
 
 ## Design system
 
 See `design-system/MASTER.md` and `design-system/pages/*`.
+
+## Deploy
+
+Set every variable in `.env.example` on the host. In particular:
+
+- `NEXT_PUBLIC_APP_URL` — public origin used for CSRF origin/referer checks.
+  Provisioning fails closed if it is unset or invalid. Do not fall back to
+  localhost in production.
+- `COMFYPEER_SESSION_SECRET` — HMAC key for `__Host-comfypeer_session`. Bump
+  `SESSION_VERSION` in `lib/session.ts` to invalidate existing cookies after a
+  suspected leak (clearing the cookie alone cannot revoke a copied token).
+- Auth0 and PymtHouse credentials as listed in `.env.example`.
+
+The session cookie uses the `__Host-` prefix (Secure, `Path=/`, no Domain).
+The app must be served over HTTPS, or over `localhost` for local development.
 
 ## Orchestrator discovery
 

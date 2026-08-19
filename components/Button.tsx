@@ -32,6 +32,13 @@ export function Button({
 }: ButtonProps) {
   const cls = `inline-flex items-center justify-center gap-2 rounded-md px-5 py-2.5 text-sm font-semibold transition-opacity duration-[var(--motion-base)] disabled:opacity-40 disabled:pointer-events-none ${variants[variant]} ${className}`;
   if (href && !disabled) {
+    if (href.startsWith("/auth/")) {
+      return (
+        <a href={href} className={cls}>
+          {children}
+        </a>
+      );
+    }
     return (
       <Link href={href} className={cls}>
         {children}
