@@ -1,9 +1,11 @@
+import { appBaseUrl } from "@/lib/app-url";
+
 export const SITE = {
   name: "ComfyPeer",
   tagline: "Your ComfyUI, live and agent-drivable.",
   oneLiner:
     "Real-time AI video from your own ComfyUI graph. Change the prompt while it runs. Billed by the second.",
-  url: process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+  url: appBaseUrl(),
 } as const;
 
 export const NAV_MARKETING = [

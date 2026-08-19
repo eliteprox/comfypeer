@@ -15,10 +15,11 @@ import { LogoMark } from "@/components/Logo";
 import { Button } from "@/components/Button";
 import { LiveDemoWidget } from "@/components/LiveDemoWidget";
 import { useAuth } from "@/components/AuthProvider";
+import { MissingEmailNotice } from "@/components/MissingEmailNotice";
 import { PIPELINES, RESOLUTION_PRESETS, formatUsd } from "@/lib/constants";
 
 export default function StudioPage() {
-  const { user, ready, signOut } = useAuth();
+  const { user, ready, missingEmail, signOut } = useAuth();
   const router = useRouter();
   const [pipelineId, setPipelineId] = useState<string>(PIPELINES[0]!.id);
   const [resId, setResId] = useState<string>(RESOLUTION_PRESETS[0]!.id);
@@ -26,8 +27,8 @@ export default function StudioPage() {
   const [orchLabel, setOrchLabel] = useState<string>("—");
 
   useEffect(() => {
-    if (ready && !user) router.replace("/login");
-  }, [ready, user, router]);
+    if (ready && !user && !missingEmail) router.replace("/login");
+  }, [ready, user, missingEmail, router]);
 
   useEffect(() => {
     if (!user) return;
@@ -50,7 +51,19 @@ export default function StudioPage() {
       .catch(() => null);
   }, [user]);
 
-  if (!ready || !user) {
+  if (!ready) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-canvas text-sm text-muted">
+        Loading studio…
+      </div>
+    );
+  }
+
+  if (missingEmail) {
+    return <MissingEmailNotice />;
+  }
+
+  if (!user) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-canvas text-sm text-muted">
         Loading studio…

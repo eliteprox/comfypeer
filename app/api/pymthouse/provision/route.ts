@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { appBaseUrl } from "@/lib/app-url";
 import { auth0 } from "@/lib/auth0";
 import { externalUserIdFromEmail } from "@/lib/external-user-id";
 import { ensureAppUserProvisioned, PmtHouseError } from "@/lib/pymthouse";
@@ -7,11 +8,9 @@ import { sessionSecretConfigured, setSessionCookie } from "@/lib/session";
 export const runtime = "nodejs";
 
 function isBrowserMutation(request: NextRequest): boolean {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (!appUrl) return true;
   let expectedOrigin: string;
   try {
-    expectedOrigin = new URL(appUrl).origin;
+    expectedOrigin = new URL(appBaseUrl()).origin;
   } catch {
     return true;
   }

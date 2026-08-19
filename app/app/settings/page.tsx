@@ -7,9 +7,10 @@ import { LogoMark } from "@/components/Logo";
 import { Button } from "@/components/Button";
 import { BillingPanel } from "@/components/BillingPanel";
 import { useAuth } from "@/components/AuthProvider";
+import { MissingEmailNotice } from "@/components/MissingEmailNotice";
 
 export default function SettingsPage() {
-  const { user, ready, signOut } = useAuth();
+  const { user, ready, missingEmail, signOut } = useAuth();
   const router = useRouter();
   const [keyBusy, setKeyBusy] = useState(false);
   const [revealed, setRevealed] = useState<{ apiKey?: string; sdkToken?: string } | null>(
@@ -18,10 +19,22 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (ready && !user) router.replace("/login");
-  }, [ready, user, router]);
+    if (ready && !user && !missingEmail) router.replace("/login");
+  }, [ready, user, missingEmail, router]);
 
-  if (!ready || !user) {
+  if (!ready) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-canvas text-sm text-muted">
+        Loading…
+      </div>
+    );
+  }
+
+  if (missingEmail) {
+    return <MissingEmailNotice />;
+  }
+
+  if (!user) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-canvas text-sm text-muted">
         Loading…

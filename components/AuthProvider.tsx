@@ -20,6 +20,8 @@ export type ComfyUser = {
 type AuthContextValue = {
   user: ComfyUser | null;
   ready: boolean;
+  /** Auth0 session exists but the profile has no email claim. */
+  missingEmail: boolean;
   signOut: () => void;
 };
 
@@ -37,17 +39,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const { user: auth0User, isLoading } = useUser();
   const [user, setUser] = useState<ComfyUser | null>(null);
   const [ready, setReady] = useState(false);
+  const [missingEmail, setMissingEmail] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       if (isLoading) return;
 
-      if (!auth0User?.email) {
+      if (!auth0User) {
         localStorage.removeItem(STORAGE_KEY);
         await fetch("/api/session", { method: "DELETE" }).catch(() => null);
         if (!cancelled) {
           setUser(null);
+          setMissingEmail(false);
+          setReady(true);
+        }
+        return;
+      }
+
+      const email = auth0User.email?.trim().toLowerCase() || "";
+      if (!email.includes("@")) {
+        localStorage.removeItem(STORAGE_KEY);
+        await fetch("/api/session", { method: "DELETE" }).catch(() => null);
+        if (!cancelled) {
+          setUser(null);
+          setMissingEmail(true);
           setReady(true);
         }
         return;
@@ -59,7 +75,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         if (!provisionRes.ok) {
           localStorage.removeItem(STORAGE_KEY);
-          if (!cancelled) setUser(null);
+          if (!cancelled) {
+            setUser(null);
+            setMissingEmail(false);
+          }
           return;
         }
         const provisioned = (await provisionRes.json()) as {
@@ -68,7 +87,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
         if (!provisioned.externalUserId || !provisioned.email) {
           localStorage.removeItem(STORAGE_KEY);
-          if (!cancelled) setUser(null);
+          if (!cancelled) {
+            setUser(null);
+            setMissingEmail(false);
+          }
           return;
         }
 
@@ -94,10 +116,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           ),
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-        if (!cancelled) setUser(next);
+        if (!cancelled) {
+          setUser(next);
+          setMissingEmail(false);
+        }
       } catch {
         localStorage.removeItem(STORAGE_KEY);
-        if (!cancelled) setUser(null);
+        if (!cancelled) {
+          setUser(null);
+          setMissingEmail(false);
+        }
       } finally {
         if (!cancelled) setReady(true);
       }
@@ -110,6 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(() => {
     localStorage.removeItem(STORAGE_KEY);
     setUser(null);
+    setMissingEmail(false);
     void fetch("/api/session", { method: "DELETE" })
       .catch(() => null)
       .finally(() => {
@@ -117,7 +146,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
   }, []);
 
-  const value = useMemo(() => ({ user, ready, signOut }), [user, ready, signOut]);
+  const value = useMemo(
+    () => ({ user, ready, missingEmail, signOut }),
+    [user, ready, missingEmail, signOut],
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

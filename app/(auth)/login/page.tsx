@@ -1,8 +1,18 @@
+"use client";
+
 import Link from "next/link";
 import { Wordmark } from "@/components/Logo";
 import { Button } from "@/components/Button";
+import { useAuth } from "@/components/AuthProvider";
+import { MissingEmailNotice } from "@/components/MissingEmailNotice";
 
 export default function LoginPage() {
+  const { ready, missingEmail } = useAuth();
+
+  if (ready && missingEmail) {
+    return <MissingEmailNotice />;
+  }
+
   return (
     <div className="flex min-h-screen flex-col bg-canvas">
       <div className="border-b border-border px-4 py-4 sm:px-6">
