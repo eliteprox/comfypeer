@@ -25,19 +25,13 @@ type AuthContextValue = {
 
 const STORAGE_KEY = "comfypeer-user";
 
-export async function externalUserIdFromEmail(email: string): Promise<string> {
-  const normalized = email.trim().toLowerCase() || "demo@comfypeer.com";
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(`comfypeer:externalUserId:${normalized}`),
-  );
-  const hex = Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-  return `eu_${hex.slice(0, 32)}`;
-}
-
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+function displayNameFrom(email: string, storedName?: string): string {
+  const trimmed = storedName?.trim();
+  if (trimmed) return trimmed;
+  return email.split("@")[0] || "User";
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<ComfyUser | null>(null);
@@ -47,20 +41,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     void (async () => {
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const next = JSON.parse(raw) as ComfyUser;
-          if (!cancelled) setUser(next);
-          await fetch("/api/session", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email: next.email }),
-          }).catch(() => null);
+        const sessionRes = await fetch("/api/session");
+        if (!sessionRes.ok) {
+          localStorage.removeItem(STORAGE_KEY);
+          if (!cancelled) setUser(null);
+          return;
         }
+        const session = (await sessionRes.json()) as {
+          externalUserId?: string;
+          email?: string;
+        };
+        if (!session.externalUserId || !session.email) {
+          localStorage.removeItem(STORAGE_KEY);
+          if (!cancelled) setUser(null);
+          return;
+        }
+        let storedName: string | undefined;
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) {
+            const stored = JSON.parse(raw) as ComfyUser;
+            if (stored.id === session.externalUserId) {
+              storedName = stored.name;
+            }
+          }
+        } catch {
+          /* ignore corrupt local profile */
+        }
+        const next: ComfyUser = {
+          id: session.externalUserId,
+          email: session.email,
+          name: displayNameFrom(session.email, storedName),
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        if (!cancelled) setUser(next);
       } catch {
-        /* ignore */
+        localStorage.removeItem(STORAGE_KEY);
+        if (!cancelled) setUser(null);
+      } finally {
+        if (!cancelled) setReady(true);
       }
-      if (!cancelled) setReady(true);
     })();
     return () => {
       cancelled = true;
@@ -68,19 +88,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = useCallback(async (email: string, name?: string) => {
-    const id = await externalUserIdFromEmail(email);
+    const normalizedEmail = email.trim().toLowerCase();
+    const provisionRes = await fetch("/api/pymthouse/provision", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: normalizedEmail }),
+    });
+    if (!provisionRes.ok) {
+      throw new Error("Could not establish authenticated session");
+    }
+    const provisioned = (await provisionRes.json()) as {
+      externalUserId?: string;
+      email?: string;
+    };
+    if (!provisioned.externalUserId || !provisioned.email) {
+      throw new Error("Could not establish authenticated session");
+    }
     const next: ComfyUser = {
-      id,
-      email: email.trim().toLowerCase(),
-      name: name?.trim() || email.split("@")[0] || "User",
+      id: provisioned.externalUserId,
+      email: provisioned.email,
+      name: displayNameFrom(provisioned.email, name),
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     setUser(next);
-    await fetch("/api/pymthouse/provision", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: next.email }),
-    }).catch(() => null);
   }, []);
 
   const signOut = useCallback(() => {
