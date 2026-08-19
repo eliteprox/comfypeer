@@ -2,6 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/Button";
+import { PlansPanel } from "@/components/PlansPanel";
+import { redirectToCheckout } from "@/lib/checkout-redirect";
+import {
+  includedUsageRemainingLabel,
+  includedUsageSummary,
+  type IncludedUsageSummary,
+} from "@/lib/included-usage";
 import {
   DEFAULT_TOP_UP_USD,
   formatTopUpUsdLabel,
@@ -142,15 +149,6 @@ function AmountQuickPick({
   );
 }
 
-function redirectToCheckout(url: string): void {
-  const parsed = new URL(url);
-  const ok =
-    parsed.protocol === "https:" &&
-    (parsed.hostname === "checkout.stripe.com" || parsed.hostname.endsWith(".stripe.com"));
-  if (!ok) throw new Error("Checkout URL host is not allowed.");
-  window.location.assign(parsed.toString());
-}
-
 function formatCreditUsd(amount: string, currency: string): string {
   const n = Number(amount);
   if (!Number.isFinite(n)) return amount;
@@ -201,6 +199,7 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [credits, setCredits] = useState<CreditBalance | null>(null);
+  const [included, setIncluded] = useState<IncludedUsageSummary | null>(null);
   const [autoTopUp, setAutoTopUp] = useState<AutoTopUp | null>(null);
   const [autoTopUpAmount, setAutoTopUpAmount] = useState(DEFAULT_AUTO_TOP_UP_AMOUNT);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -227,8 +226,10 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
       const wallet = (await walletRes.json()) as {
         credits: CreditBalance;
         autoTopUp?: AutoTopUp | null;
+        billingState?: unknown;
       };
       setCredits(wallet.credits);
+      setIncluded(includedUsageSummary(wallet.billingState));
       const prefs = wallet.autoTopUp ?? null;
       setAutoTopUp(prefs);
       setAutoTopUpAmount(normalizedAutoTopUpAmount(prefs?.amountUsd));
@@ -485,6 +486,8 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
         </p>
       ) : null}
 
+      <PlansPanel externalUserId={externalUserId} included={included} />
+
       <section className="rounded-lg border border-border bg-surface p-5">
         {credits ? (
           <>
@@ -513,8 +516,28 @@ export function BillingPanel({ externalUserId }: { externalUserId: string }) {
               >
                 {formatCreditUsd(credits.live, currency)}
               </p>
-              <p className="mt-1 text-xs text-muted">Can spend</p>
+              <p className="mt-1 text-xs text-muted">Prepaid credits</p>
             </div>
+            {included ? (
+              <div className="mt-5">
+                <p className="font-mono text-[10px] uppercase tracking-wide text-faint">
+                  {included.planName ?? "Included usage"}
+                </p>
+                <p className="mt-1 font-mono text-2xl tabular-nums text-fg">
+                  ${included.remainingUsd}
+                  <span className="text-base text-muted"> / ${included.totalUsd}</span>
+                </p>
+                <p className="mt-1 text-xs text-muted">
+                  {includedUsageRemainingLabel(included)}
+                  {included.resetsAt
+                    ? ` · resets ${new Date(included.resetsAt).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                      })}`
+                    : ""}
+                </p>
+              </div>
+            ) : null}
             {hasPendingGrants ? (
               <p className="mt-3 font-mono text-xs text-faint">
                 Pending grants {formatCreditUsd(credits.pending, currency)} (not spendable yet)

@@ -175,6 +175,14 @@ export async function mintOwnerSignerSession(): Promise<OwnerSignerSession> {
   };
 }
 
+export function pymthouseAppsOrigin(): string {
+  return appsOrigin();
+}
+
+export function pymthouseM2mAuthHeader(): string {
+  return m2mAuthHeader();
+}
+
 function appsOrigin(): string {
   const issuer = process.env.PYMTHOUSE_ISSUER_URL?.trim();
   if (!issuer) {
@@ -326,15 +334,27 @@ async function merchantWalletRequest(
   });
 }
 
-/** Merchant wallet auto-top-up prefs from GET …/billing/wallet. */
-export async function loadWalletAutoTopUp(externalUserId: string): Promise<WalletAutoTopUp> {
+export type MerchantWalletPayload = {
+  autoTopUp?: WalletAutoTopUp | null;
+  billingState?: unknown;
+};
+
+/** GET …/billing/wallet — auto-top-up prefs + billingState (included usage). */
+export async function loadMerchantWallet(
+  externalUserId: string,
+): Promise<MerchantWalletPayload> {
   const response = await merchantWalletRequest(
     merchantWalletUrl(externalUserId),
     { method: "GET" },
-    "Failed to load auto top-up",
-    "auto_topup_load_failed",
+    "Failed to load wallet",
+    "wallet_load_failed",
   );
-  const body = (await response.json()) as { autoTopUp?: WalletAutoTopUp | null };
+  return (await response.json()) as MerchantWalletPayload;
+}
+
+/** Merchant wallet auto-top-up prefs from GET …/billing/wallet. */
+export async function loadWalletAutoTopUp(externalUserId: string): Promise<WalletAutoTopUp> {
+  const body = await loadMerchantWallet(externalUserId);
   return body.autoTopUp ?? { enabled: false, amountUsd: null };
 }
 

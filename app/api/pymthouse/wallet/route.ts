@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   listUserPaymentMethods,
+  loadMerchantWallet,
   loadUserCreditBalance,
-  loadWalletAutoTopUp,
   PmtHouseError,
   saveWalletAutoTopUp,
 } from "@/lib/pymthouse";
@@ -32,15 +32,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: owner.error }, { status: owner.status });
   }
   try {
-    const [creditsResult, autoTopUpResult] = await Promise.allSettled([
+    const [creditsResult, walletResult] = await Promise.allSettled([
       loadUserCreditBalance(owner.externalUserId),
-      loadWalletAutoTopUp(owner.externalUserId),
+      loadMerchantWallet(owner.externalUserId),
     ]);
     if (creditsResult.status === "rejected") {
       throw creditsResult.reason;
     }
-    const autoTopUp = autoTopUpResult.status === "fulfilled" ? autoTopUpResult.value : null;
-    return NextResponse.json({ credits: creditsResult.value, autoTopUp });
+    const wallet = walletResult.status === "fulfilled" ? walletResult.value : null;
+    return NextResponse.json({
+      credits: creditsResult.value,
+      autoTopUp: wallet?.autoTopUp ?? null,
+      billingState: wallet?.billingState ?? null,
+    });
   } catch (error) {
     return pmtHouseErrorResponse(error, "Failed to load billing");
   }
