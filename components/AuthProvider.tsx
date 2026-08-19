@@ -142,7 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       /* ignore */
     }
-    window.location.assign("/auth/logout?returnTo=/");
+    window.location.assign("/auth/logout");
   }, []);
 
   const value = useMemo(
