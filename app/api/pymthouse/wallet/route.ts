@@ -23,14 +23,18 @@ function pmtHouseErrorResponse(error: unknown, fallback: string): NextResponse {
 }
 
 export async function GET(request: NextRequest) {
-  const externalUserId = request.nextUrl.searchParams.get("externalUserId")?.trim() || "";
-  if (!externalUserId) {
+  const claimedUserId = request.nextUrl.searchParams.get("externalUserId")?.trim() || "";
+  if (!claimedUserId) {
     return NextResponse.json({ error: "externalUserId is required" }, { status: 400 });
+  }
+  const owner = requireSessionUserId(request, claimedUserId);
+  if (!owner.ok) {
+    return NextResponse.json({ error: owner.error }, { status: owner.status });
   }
   try {
     const [creditsResult, autoTopUpResult] = await Promise.allSettled([
-      loadUserCreditBalance(externalUserId),
-      loadWalletAutoTopUp(externalUserId),
+      loadUserCreditBalance(owner.externalUserId),
+      loadWalletAutoTopUp(owner.externalUserId),
     ]);
     if (creditsResult.status === "rejected") {
       throw creditsResult.reason;

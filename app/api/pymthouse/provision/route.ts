@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { appBaseUrl } from "@/lib/app-url";
 import { auth0 } from "@/lib/auth0";
+import { isValidEmail } from "@/lib/email";
 import { externalUserIdFromEmail } from "@/lib/external-user-id";
 import { ensureAppUserProvisioned, PmtHouseError } from "@/lib/pymthouse";
 import { sessionSecretConfigured, setSessionCookie } from "@/lib/session";
@@ -8,11 +8,13 @@ import { sessionSecretConfigured, setSessionCookie } from "@/lib/session";
 export const runtime = "nodejs";
 
 function isBrowserMutation(request: NextRequest): boolean {
+  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (!configured) return false;
   let expectedOrigin: string;
   try {
-    expectedOrigin = new URL(appBaseUrl()).origin;
+    expectedOrigin = new URL(configured).origin;
   } catch {
-    return true;
+    return false;
   }
   const origin = request.headers.get("origin");
   if (origin) return origin === expectedOrigin;
@@ -38,7 +40,7 @@ export async function POST(request: NextRequest) {
   try {
     const session = await auth0.getSession();
     const email = session?.user?.email?.trim().toLowerCase() || "";
-    if (!email.includes("@")) {
+    if (!isValidEmail(email)) {
       return NextResponse.json({ error: "Sign in required" }, { status: 401 });
     }
     const externalUserId = externalUserIdFromEmail(email);

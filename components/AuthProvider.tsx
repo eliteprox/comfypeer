@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { useUser } from "@auth0/nextjs-auth0/client";
+import { isValidEmail } from "@/lib/email";
 
 export type ComfyUser = {
   id: string;
@@ -22,7 +23,7 @@ type AuthContextValue = {
   ready: boolean;
   /** Auth0 session exists but the profile has no email claim. */
   missingEmail: boolean;
-  signOut: () => void;
+  signOut: () => Promise<void>;
 };
 
 const STORAGE_KEY = "comfypeer-user";
@@ -58,7 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const email = auth0User.email?.trim().toLowerCase() || "";
-      if (!email.includes("@")) {
+      if (!isValidEmail(email)) {
         localStorage.removeItem(STORAGE_KEY);
         await fetch("/api/session", { method: "DELETE" }).catch(() => null);
         if (!cancelled) {
@@ -110,10 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const next: ComfyUser = {
           id: provisioned.externalUserId,
           email: provisioned.email,
-          name: displayNameFrom(
-            provisioned.email,
-            auth0User.name?.trim() || storedName,
-          ),
+          name: displayNameFrom(provisioned.email, auth0User.name?.trim() || storedName),
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
         if (!cancelled) {
@@ -135,15 +133,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [auth0User, isLoading]);
 
-  const signOut = useCallback(() => {
+  const signOut = useCallback(async () => {
     localStorage.removeItem(STORAGE_KEY);
     setUser(null);
     setMissingEmail(false);
-    void fetch("/api/session", { method: "DELETE" })
-      .catch(() => null)
-      .finally(() => {
-        window.location.assign("/auth/logout?returnTo=/");
-      });
+    try {
+      await fetch("/api/session", { method: "DELETE" });
+    } catch {
+      /* ignore */
+    }
+    window.location.assign("/auth/logout?returnTo=/");
   }, []);
 
   const value = useMemo(
