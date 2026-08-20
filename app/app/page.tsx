@@ -165,8 +165,8 @@ export default function StudioPage() {
 
           <p className="text-xs text-faint">
             Authenticated jobs use a SignerSession JWT in sessionStorage, reserve{" "}
-            <span className="font-mono">comfystream</span> on the orchestrator, and relay media
-            through the WebRTC↔trickle bridge. Idle disconnect fires around 60s without frames.
+            <span className="font-mono">comfystream</span> on the orchestrator, and stream JPEG
+            frames over the orch-proxied <span className="font-mono">/ws_stream</span> WebSocket.
           </p>
         </div>
       </div>

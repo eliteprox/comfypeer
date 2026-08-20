@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Camera, Film, Pause, Play, Square } from "lucide-react";
 import { Button } from "@/components/Button";
-import { connectViaBridge } from "@/lib/live-runner-client";
+import { connectViaWsStream } from "@/lib/live-runner-client";
 import { ensureBrowserSignerSession } from "@/lib/signer-session-browser";
 import {
   PIPELINES,
@@ -31,15 +31,6 @@ type Props = {
   resId: string;
 };
 
-function bridgeUrl(): string {
-  // Must be HTTPS when the app is served over HTTPS (mixed-content blocks http://
-  // except loopback). Prefer env; fall back to the public tunnel/bridge host.
-  return (
-    process.env.NEXT_PUBLIC_WEBRTC_BRIDGE_URL?.trim() ||
-    "https://match-border-prominent-horn.trycloudflare.com"
-  );
-}
-
 function captureVideoStream(video: HTMLVideoElement): MediaStream {
   const withCapture = video as HTMLVideoElement & {
     captureStream?: () => MediaStream;
@@ -53,7 +44,7 @@ function captureVideoStream(video: HTMLVideoElement): MediaStream {
   return stream;
 }
 
-/** Sample clip is video-only; bridge / AV workflows still expect an audio track. */
+/** Sample clip is video-only; silent audio kept for camera-parity workflows. */
 function attachSilentAudio(
   stream: MediaStream,
   audioCtxRef: { current: AudioContext | null },
@@ -77,7 +68,7 @@ function attachSilentAudio(
 
 export function StreamStudio({ pipelineId, resId }: Props) {
   const localVideoRef = useRef<HTMLVideoElement>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteCanvasRef = useRef<HTMLCanvasElement>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const clipAudioCtxRef = useRef<AudioContext | null>(null);
   const sessionCloseRef = useRef<(() => Promise<void>) | null>(null);
@@ -122,7 +113,11 @@ export function StreamStudio({ pipelineId, resId }: Props) {
       await sessionCloseRef.current().catch(() => null);
       sessionCloseRef.current = null;
     }
-    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+    const canvas = remoteCanvasRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext("2d");
+      ctx?.clearRect(0, 0, canvas.width, canvas.height);
+    }
     if (startedAtRef.current != null) {
       accruedRef.current +=
         (performance.now() - startedAtRef.current) / 1000;
@@ -228,40 +223,37 @@ export function StreamStudio({ pipelineId, resId }: Props) {
 
     setPhase("connecting");
     try {
-      const local = await ensureLocalStream();
+      await ensureLocalStream();
+      const video = localVideoRef.current;
+      const canvas = remoteCanvasRef.current;
+      if (!video || !canvas) {
+        throw new Error("Preview elements missing");
+      }
       const signer = await ensureBrowserSignerSession("");
-      const session = await connectViaBridge({
-        bridgeUrl: bridgeUrl(),
-        localStream: local,
+      if (!signer.signer_url) {
+        throw new Error("SignerSession missing signer_url");
+      }
+      const session = await connectViaWsStream({
         accessToken: signer.access_token,
         discoveryUrl: signer.discovery_url,
         signerUrl: signer.signer_url,
         prompts,
         width: res.width,
         height: res.height,
-        audio: true,
-        onRemoteStream: (remote) => {
-          if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = remote;
-            void remoteVideoRef.current.play().catch(() => null);
-          }
-        },
+        localVideo: video,
+        outputCanvas: canvas,
         onConnectionState: (state) => {
           setConnState(state);
           if (state === "connected") {
             startedAtRef.current = performance.now();
             setPhase("live");
           }
-          if (state === "failed" || state === "disconnected" || state === "closed") {
+          if (state === "failed" || state === "closed") {
             void teardown();
           }
         },
       });
       sessionCloseRef.current = session.close;
-      if (pcConnectedSoon(session.pc)) {
-        startedAtRef.current = performance.now();
-        setPhase("live");
-      }
     } catch (err) {
       setPhase("idle");
       setError(err instanceof Error ? err.message : "Failed to start stream");
@@ -296,8 +288,8 @@ export function StreamStudio({ pipelineId, resId }: Props) {
   return (
     <div className="space-y-3">
       <div className="grid gap-3 lg:grid-cols-2">
-        <Preview label="Input" videoRef={localVideoRef} />
-        <Preview label="Output" videoRef={remoteVideoRef} />
+        <VideoPreview label="Input" videoRef={localVideoRef} />
+        <CanvasPreview label="Output" canvasRef={remoteCanvasRef} />
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-xs font-mono text-muted">
@@ -314,7 +306,7 @@ export function StreamStudio({ pipelineId, resId }: Props) {
         <span>
           rate {formatUsd(rate)}/s
         </span>
-        <span>pc {connState}</span>
+        <span>ws {connState}</span>
         <span className="text-faint">{pipeline.nodes.join(" → ")}</span>
       </div>
 
@@ -404,11 +396,7 @@ export function StreamStudio({ pipelineId, resId }: Props) {
   );
 }
 
-function pcConnectedSoon(pc: RTCPeerConnection): boolean {
-  return pc.connectionState === "connected";
-}
-
-function Preview({
+function VideoPreview({
   label,
   videoRef,
 }: {
@@ -424,8 +412,28 @@ function Preview({
         ref={videoRef}
         className="aspect-video w-full bg-black object-contain"
         playsInline
-        muted={label === "Input"}
+        muted
         autoPlay
+      />
+    </div>
+  );
+}
+
+function CanvasPreview({
+  label,
+  canvasRef,
+}: {
+  label: string;
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
+}) {
+  return (
+    <div className="overflow-hidden rounded-md border border-border bg-elevated">
+      <div className="flex items-center justify-between border-b border-border px-2 py-1 text-[11px] uppercase tracking-wide text-muted">
+        {label}
+      </div>
+      <canvas
+        ref={canvasRef}
+        className="aspect-video w-full bg-black object-contain"
       />
     </div>
   );
