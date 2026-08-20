@@ -1,0 +1,566 @@
+import "server-only";
+
+const APP_ID = "comfystream";
+
+/** Staging orch that advertises the comfystream live-runner (not in pymthouse discover-orchestrators). */
+const DEFAULT_COMFYSTREAM_DISCOVERY_URL =
+  "https://ai1.eliteencoder.net:8936/discovery";
+
+export type ReservedLiveSession = {
+  session_id: string;
+  app_url: string;
+  runner_url: string;
+  ws_url: string;
+  payment: PaymentHandle | null;
+};
+
+export type PaymentHandle = {
+  signer_url: string;
+  orchestrator_url: string;
+  payment_params: string;
+  manifest_id: string;
+  state: Record<string, unknown> | null;
+  /**
+   * Remote-signer payment type. Must match discovery `price_info.unit`:
+   * seconds/hour → `live` (time-metered), fixed → `fixed`, 720p* → `lv2v`.
+   * Using `lv2v` for seconds-priced runners inflates ticket EV past signer max.
+   */
+  payment_type: string;
+};
+
+/** Matches livepeer-gateway `_RUNNER_PAYMENT_TYPES_BY_UNIT`. */
+const PAYMENT_TYPES_BY_UNIT: Record<string, string> = {
+  hour: "live",
+  seconds: "live",
+  "720p": "lv2v",
+  "720p-pixel-seconds": "lv2v",
+  fixed: "fixed",
+};
+
+/** ComfyStream is continuous metered stream → time-based `live`, never batch `fixed`/`lv2v`. */
+const DEFAULT_PAYMENT_TYPE = "live";
+
+type DiscoveryPriceInfo = {
+  price?: number;
+  currency?: string;
+  unit?: string;
+};
+
+type DiscoveryRunner = {
+  url: string;
+  app: string;
+  mode?: string;
+  capacity_available?: number;
+  price_info?: DiscoveryPriceInfo;
+};
+
+type DiscoveryOrch = {
+  address?: string;
+  runners?: DiscoveryRunner[];
+};
+
+type RunnerCandidate = {
+  runnerUrl: string;
+  orchAddress: string;
+  paymentType: string;
+};
+
+type DiscoveryScan = {
+  orchCount: number;
+  runnerCount: number;
+  matchingAppCount: number;
+  capacityZeroCount: number;
+  candidates: RunnerCandidate[];
+};
+
+export function paymentTypeFromPriceUnit(unit?: string | null): string {
+  const key = (unit || "").trim().toLowerCase();
+  if (!key) return DEFAULT_PAYMENT_TYPE;
+  return PAYMENT_TYPES_BY_UNIT[key] || DEFAULT_PAYMENT_TYPE;
+}
+
+function formatSignerErrorBody(data: unknown): string {
+  if (typeof data === "string") return data.slice(0, 500);
+  if (!data || typeof data !== "object") return "";
+  const obj = data as Record<string, unknown>;
+  const err = obj.error;
+  if (typeof err === "string") return err.slice(0, 500);
+  if (err && typeof err === "object") {
+    const nested = err as Record<string, unknown>;
+    if (typeof nested.message === "string" && nested.message.trim()) {
+      return nested.message.slice(0, 500);
+    }
+    return JSON.stringify(err).slice(0, 500);
+  }
+  if (typeof obj.message === "string" && obj.message.trim()) {
+    return obj.message.slice(0, 500);
+  }
+  try {
+    return JSON.stringify(obj).slice(0, 500);
+  } catch {
+    return "";
+  }
+}
+
+function originOf(url: string): string {
+  const parsed = new URL(url);
+  return `${parsed.protocol}//${parsed.host}`;
+}
+
+/**
+ * Prefer an explicit live-runner orch discovery pin over SignerSession /
+ * `{signer}/discover-orchestrators`, which historically omit app=comfystream.
+ *
+ * Do **not** reuse NEXT_PUBLIC_ORCH_DISCOVERY_URL here: staging often sets that
+ * to a daydream/pymthouse orch (self-signed TLS, no comfystream runners), which
+ * surfaces as opaque undici "fetch failed" from the Vercel BFF.
+ */
+export function resolveLiveRunnerDiscoveryUrl(requested?: string | null): string {
+  const candidates = [
+    process.env.LIVE_RUNNER_DISCOVERY_URL?.trim() || "",
+    process.env.ORCH_DISCOVERY_URL?.trim() || "",
+    "",
+  ];
+  const orch = process.env.ORCH_URL?.trim() || "";
+  if (orch) {
+    try {
+      const u = new URL(orch);
+      u.pathname = "/discovery";
+      u.search = "";
+      u.hash = "";
+      candidates.push(u.toString());
+    } catch {
+      /* ignore invalid ORCH_URL */
+    }
+  }
+  if (requested?.trim()) {
+    candidates.push(requested.trim());
+  }
+  candidates.push(DEFAULT_COMFYSTREAM_DISCOVERY_URL);
+
+  for (const raw of candidates) {
+    if (!raw) continue;
+    try {
+      const url = new URL(raw).toString();
+      if (new URL(url).hostname.toLowerCase().endsWith("daydream.monster")) {
+        continue;
+      }
+      return url;
+    } catch {
+      /* try next */
+    }
+  }
+  return DEFAULT_COMFYSTREAM_DISCOVERY_URL;
+}
+
+function isSignerDiscoverOrchestratorsUrl(url: string): boolean {
+  try {
+    return new URL(url).pathname.replace(/\/+$/, "").endsWith("/discover-orchestrators");
+  } catch {
+    return false;
+  }
+}
+
+function wsFromHttp(appUrl: string, path: string): string {
+  const u = new URL(appUrl.replace(/\/$/, "") + path);
+  u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
+  return u.toString();
+}
+
+/** Undici often surfaces only "fetch failed"; unwrap cause + URL for BFF 502s. */
+export function formatUpstreamFetchError(
+  err: unknown,
+  method: string,
+  url: string,
+): Error {
+  const bits: string[] = [`${method} ${url}`];
+  if (err instanceof Error) {
+    bits.push(err.message);
+    const cause = (err as Error & { cause?: unknown }).cause;
+    if (cause instanceof Error) {
+      const code = (cause as NodeJS.ErrnoException).code;
+      bits.push(code ? `${cause.message} [${code}]` : cause.message);
+    } else if (cause != null && typeof cause === "object") {
+      const code =
+        "code" in cause && typeof (cause as { code?: unknown }).code === "string"
+          ? (cause as { code: string }).code
+          : "";
+      const msg =
+        "message" in cause &&
+        typeof (cause as { message?: unknown }).message === "string"
+          ? (cause as { message: string }).message
+          : String(cause);
+      bits.push(code ? `${msg} [${code}]` : msg);
+    } else if (cause != null) {
+      bits.push(String(cause));
+    }
+  } else {
+    bits.push(String(err));
+  }
+  return new Error(bits.join(" → "));
+}
+
+async function fetchJson(
+  url: string,
+  init: RequestInit & { timeoutMs?: number } = {},
+): Promise<{ status: number; data: unknown; headers: Headers }> {
+  const { timeoutMs = 15_000, ...rest } = init;
+  const method = (rest.method || "GET").toUpperCase();
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...rest,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    throw formatUpstreamFetchError(err, method, url);
+  }
+  const text = await res.text();
+  let data: unknown = null;
+  if (text) {
+    try {
+      data = JSON.parse(text) as unknown;
+    } catch {
+      data = text;
+    }
+  }
+  return { status: res.status, data, headers: res.headers };
+}
+
+async function signerAddress(
+  signerUrl: string,
+  accessToken: string,
+): Promise<string> {
+  const { status, data } = await fetchJson(
+    `${originOf(signerUrl)}/sign-orchestrator-info`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: "{}",
+    },
+  );
+  if (status >= 400) {
+    throw new Error(`signer address failed (${status})`);
+  }
+  const address =
+    data && typeof data === "object" && "address" in data
+      ? String((data as { address?: unknown }).address || "")
+      : "";
+  if (!address) throw new Error("signer returned no address");
+  return address;
+}
+
+async function generateLivePayment(
+  handle: PaymentHandle,
+  accessToken: string,
+): Promise<{ payment: string; segCreds: string; state: Record<string, unknown> }> {
+  const paymentType =
+    (handle.payment_type || "").trim() || DEFAULT_PAYMENT_TYPE;
+  const payload: Record<string, unknown> = {
+    orchestrator: handle.payment_params,
+    type: paymentType,
+    ManifestID: handle.manifest_id,
+    app: APP_ID,
+  };
+  if (handle.state) payload.state = handle.state;
+
+  const signerOrigin = originOf(handle.signer_url);
+  const { status, data } = await fetchJson(
+    `${signerOrigin}/generate-live-payment`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+  if (status >= 400) {
+    const detail = formatSignerErrorBody(data);
+    throw new Error(
+      `generate-live-payment failed (${status}) at ${signerOrigin}${
+        detail ? `: ${detail}` : ""
+      }`,
+    );
+  }
+  const obj = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  const payment = typeof obj.payment === "string" ? obj.payment : "";
+  const segCreds = typeof obj.segCreds === "string" ? obj.segCreds : "";
+  const state =
+    obj.state && typeof obj.state === "object"
+      ? (obj.state as Record<string, unknown>)
+      : null;
+  if (!payment || !segCreds || !state) {
+    throw new Error("generate-live-payment missing payment/segCreds/state");
+  }
+  return { payment, segCreds, state };
+}
+
+async function scanDiscovery(
+  discoveryUrl: string,
+  accessToken: string,
+): Promise<DiscoveryScan> {
+  const { status, data } = await fetchJson(discoveryUrl, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json",
+    },
+  });
+  if (status >= 400) {
+    throw new Error(`discovery failed (${status}) at ${discoveryUrl}`);
+  }
+  const list = Array.isArray(data) ? (data as DiscoveryOrch[]) : [];
+  const scan: DiscoveryScan = {
+    orchCount: list.length,
+    runnerCount: 0,
+    matchingAppCount: 0,
+    capacityZeroCount: 0,
+    candidates: [],
+  };
+  for (const orch of list) {
+    const address = typeof orch.address === "string" ? orch.address : "";
+    for (const runner of orch.runners || []) {
+      scan.runnerCount += 1;
+      if (runner.app !== APP_ID) continue;
+      scan.matchingAppCount += 1;
+      if (!runner.url) continue;
+      if (typeof runner.capacity_available === "number" && runner.capacity_available <= 0) {
+        scan.capacityZeroCount += 1;
+        continue;
+      }
+      scan.candidates.push({
+        runnerUrl: runner.url,
+        orchAddress: address,
+        paymentType: paymentTypeFromPriceUnit(runner.price_info?.unit),
+      });
+    }
+  }
+  return scan;
+}
+
+function describeEmptyDiscovery(discoveryUrl: string, scan: DiscoveryScan): string {
+  if (scan.orchCount === 0 && scan.runnerCount === 0) {
+    return `discovery empty (no orchestrators) at ${discoveryUrl}`;
+  }
+  if (scan.matchingAppCount === 0) {
+    return `no matching app "${APP_ID}" in discovery at ${discoveryUrl} (${scan.runnerCount} runners across ${scan.orchCount} orchestrators)`;
+  }
+  if (scan.capacityZeroCount > 0 && scan.candidates.length === 0) {
+    return `app "${APP_ID}" found but capacity_available is 0 at ${discoveryUrl}`;
+  }
+  return `no comfystream runners available at ${discoveryUrl}`;
+}
+
+async function discoverComfyRunners(
+  discoveryUrl: string,
+  accessToken: string,
+): Promise<RunnerCandidate[]> {
+  const tried = new Set<string>();
+  const urls: string[] = [discoveryUrl];
+
+  // Signer discover-orchestrators historically omits ai1/comfystream.
+  if (isSignerDiscoverOrchestratorsUrl(discoveryUrl)) {
+    urls.push(resolveLiveRunnerDiscoveryUrl(null));
+  }
+  urls.push(DEFAULT_COMFYSTREAM_DISCOVERY_URL);
+
+  let lastUrl = discoveryUrl;
+  let lastScan: DiscoveryScan | null = null;
+
+  for (const url of urls) {
+    if (tried.has(url)) continue;
+    tried.add(url);
+    const scan = await scanDiscovery(url, accessToken);
+    if (scan.candidates.length > 0) {
+      return scan.candidates;
+    }
+    lastUrl = url;
+    lastScan = scan;
+  }
+
+  throw new Error(
+    describeEmptyDiscovery(lastUrl, lastScan ?? {
+      orchCount: 0,
+      runnerCount: 0,
+      matchingAppCount: 0,
+      capacityZeroCount: 0,
+      candidates: [],
+    }),
+  );
+}
+
+/**
+ * Reserve a persistent comfystream live-runner session (402 payment challenge).
+ * Caller must keep funding via {@link tickSessionPayment} while the WS is open.
+ */
+export async function reserveComfySession(opts: {
+  accessToken: string;
+  discoveryUrl: string;
+  signerUrl: string;
+}): Promise<ReservedLiveSession> {
+  const accessToken = opts.accessToken.trim();
+  const signerUrl = opts.signerUrl.trim();
+  const discoveryUrl = resolveLiveRunnerDiscoveryUrl(opts.discoveryUrl);
+  if (!accessToken || !signerUrl) {
+    throw new Error("access_token and signer_url are required");
+  }
+
+  const runners = await discoverComfyRunners(discoveryUrl, accessToken);
+
+  const payer = await signerAddress(signerUrl, accessToken);
+  let lastError = "all runners failed";
+
+  for (const candidate of runners) {
+    try {
+      const reserved = await reserveOneRunner({
+        runnerUrl: candidate.runnerUrl,
+        signerUrl,
+        accessToken,
+        payer,
+        paymentType: candidate.paymentType,
+      });
+      return reserved;
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+    }
+  }
+  throw new Error(lastError);
+}
+
+async function reserveOneRunner(opts: {
+  runnerUrl: string;
+  signerUrl: string;
+  accessToken: string;
+  payer: string;
+  paymentType: string;
+}): Promise<ReservedLiveSession> {
+  let challenge: {
+    payment_params: string;
+    orchestrator: string;
+    manifest_id: string;
+  } | null = null;
+  let paymentHandle: PaymentHandle | null = null;
+
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "Livepeer-Payer-Address": opts.payer,
+    };
+    if (challenge !== null && paymentHandle !== null) {
+      const paid = await generateLivePayment(paymentHandle, opts.accessToken);
+      const nextHandle: PaymentHandle = {
+        signer_url: paymentHandle.signer_url,
+        orchestrator_url: paymentHandle.orchestrator_url,
+        payment_params: paymentHandle.payment_params,
+        manifest_id: paymentHandle.manifest_id,
+        payment_type: paymentHandle.payment_type,
+        state: paid.state,
+      };
+      paymentHandle = nextHandle;
+      headers["Livepeer-Payment"] = paid.payment;
+      headers["Livepeer-Segment"] = paid.segCreds;
+    }
+
+    const { status, data } = await fetchJson(opts.runnerUrl, {
+      method: "POST",
+      headers,
+      body: "{}",
+      timeoutMs: 20_000,
+    });
+
+    if (status === 402) {
+      const obj = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+      const payment_params =
+        typeof obj.payment_params === "string" ? obj.payment_params : "";
+      const orchestrator =
+        typeof obj.orchestrator === "string" ? obj.orchestrator : "";
+      const manifest_id =
+        typeof obj.manifest_id === "string" ? obj.manifest_id : "";
+      if (!payment_params || !orchestrator || !manifest_id) {
+        throw new Error("402 challenge missing payment fields");
+      }
+      challenge = { payment_params, orchestrator, manifest_id };
+      paymentHandle = {
+        signer_url: opts.signerUrl,
+        orchestrator_url: orchestrator,
+        payment_params,
+        manifest_id,
+        payment_type: opts.paymentType || DEFAULT_PAYMENT_TYPE,
+        state: paymentHandle?.state ?? null,
+      };
+      continue;
+    }
+
+    if (status >= 400) {
+      const detail =
+        typeof data === "string"
+          ? data
+          : data && typeof data === "object" && "error" in data
+            ? String((data as { error?: unknown }).error)
+            : `HTTP ${status}`;
+      throw new Error(`reserve failed: ${detail}`);
+    }
+
+    const obj = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+    const session_id = typeof obj.session_id === "string" ? obj.session_id.trim() : "";
+    const app_url = typeof obj.app_url === "string" ? obj.app_url.trim() : "";
+    if (!session_id || !app_url) {
+      throw new Error("reserve response missing session_id/app_url");
+    }
+    return {
+      session_id,
+      app_url,
+      runner_url: opts.runnerUrl,
+      ws_url: wsFromHttp(app_url, "/ws_stream"),
+      payment: paymentHandle,
+    };
+  }
+  throw new Error("exhausted payment challenge retries");
+}
+
+/** Keep a reserved session funded (orchestrator debit tick). */
+export async function tickSessionPayment(opts: {
+  accessToken: string;
+  payment: PaymentHandle;
+}): Promise<PaymentHandle> {
+  const paid = await generateLivePayment(opts.payment, opts.accessToken);
+  const next: PaymentHandle = { ...opts.payment, state: paid.state };
+  const url = `${originOf(opts.payment.orchestrator_url)}/payment`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Livepeer-Payment": paid.payment,
+      "Livepeer-Segment": paid.segCreds,
+    },
+    body: "",
+    signal: AbortSignal.timeout(10_000),
+  });
+  // 482 = skip / paid up — treat as success.
+  if (res.status >= 400 && res.status !== 482) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`payment tick failed (${res.status}): ${text}`);
+  }
+  return next;
+}
+
+export async function stopComfySession(opts: {
+  runnerUrl: string;
+  sessionId: string;
+}): Promise<void> {
+  // runnerUrl is …/apps/{runner}/session — stop is …/session/{id}/stop
+  const base = opts.runnerUrl.replace(/\/$/, "");
+  const url = `${base}/${encodeURIComponent(opts.sessionId)}/stop`;
+  await fetch(url, {
+    method: "POST",
+    body: "",
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => null);
+}

@@ -12,6 +12,7 @@ import {
 import { useUser } from "@auth0/nextjs-auth0/client";
 import { authLogoutHref } from "@/lib/app-url";
 import { isValidEmail } from "@/lib/email";
+import { clearSignerSession } from "@/lib/signer-session-browser";
 
 export type ComfyUser = {
   id: string;
@@ -50,6 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (!auth0User) {
         localStorage.removeItem(STORAGE_KEY);
+        clearSignerSession();
         await fetch("/api/session", { method: "DELETE" }).catch(() => null);
         if (!cancelled) {
           setUser(null);
@@ -136,6 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     localStorage.removeItem(STORAGE_KEY);
+    clearSignerSession();
     setUser(null);
     setMissingEmail(false);
     try {
