@@ -57,10 +57,22 @@ export async function POST(request: NextRequest) {
   } | null;
 
   try {
+    const signerUrl = body?.signer_url?.trim()
+      ? resolveSignerUrl(body.signer_url)
+      : "";
+    if (!signerUrl) {
+      return withCors(
+        request,
+        NextResponse.json(
+          { error: "signer_url is required (from SignerSession exchange)" },
+          { status: 400 },
+        ),
+      );
+    }
     const reserved = await reserveComfySession({
       accessToken: body?.access_token || "",
       discoveryUrl: body?.discovery_url || "",
-      signerUrl: resolveSignerUrl(body?.signer_url),
+      signerUrl,
     });
     return withCors(request, NextResponse.json(reserved));
   } catch (err) {

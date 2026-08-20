@@ -230,10 +230,14 @@ export function StreamStudio({ pipelineId, resId }: Props) {
         throw new Error("Preview elements missing");
       }
       const signer = await ensureBrowserSignerSession("");
+      const signerUrl = signer.signer_url?.trim() || "";
+      if (!signerUrl) {
+        throw new Error("SignerSession missing signer_url from exchange");
+      }
       const session = await connectViaWsStream({
         accessToken: signer.access_token,
         discoveryUrl: signer.discovery_url,
-        signerUrl: signer.signer_url?.trim() || undefined,
+        signerUrl,
         prompts,
         width: res.width,
         height: res.height,

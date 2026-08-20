@@ -50,8 +50,18 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    if (!body.payment.signer_url?.trim()) {
+      return withCors(
+        request,
+        NextResponse.json(
+          { error: "payment.signer_url is required" },
+          { status: 400 },
+        ),
+      );
+    }
     const paymentHandle: PaymentHandle = {
       ...body.payment,
+      // Normalize only — never replace a real exchange host with a guessed default.
       signer_url: resolveSignerUrl(body.payment.signer_url),
     };
     const payment = await tickSessionPayment({

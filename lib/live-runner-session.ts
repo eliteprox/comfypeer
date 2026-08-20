@@ -100,8 +100,9 @@ async function generateLivePayment(
   };
   if (handle.state) payload.state = handle.state;
 
+  const signerOrigin = originOf(handle.signer_url);
   const { status, data } = await fetchJson(
-    `${originOf(handle.signer_url)}/generate-live-payment`,
+    `${signerOrigin}/generate-live-payment`,
     {
       method: "POST",
       headers: {
@@ -113,7 +114,17 @@ async function generateLivePayment(
     },
   );
   if (status >= 400) {
-    throw new Error(`generate-live-payment failed (${status})`);
+    const detail =
+      typeof data === "string"
+        ? data.slice(0, 300)
+        : data && typeof data === "object" && "error" in data
+          ? JSON.stringify((data as { error?: unknown }).error).slice(0, 300)
+          : "";
+    throw new Error(
+      `generate-live-payment failed (${status}) at ${signerOrigin}${
+        detail ? `: ${detail}` : ""
+      }`,
+    );
   }
   const obj = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
   const payment = typeof obj.payment === "string" ? obj.payment : "";

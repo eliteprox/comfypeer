@@ -64,16 +64,22 @@ export type UserSignerSession = {
   tokenType: "Bearer";
   expiresIn: number;
   scope: string;
-  /** Always set — mint response, else env / default. */
+  /** Remote signer DMZ from exchange (never a guessed production default). */
   signerUrl: string;
   discoveryUrl: string;
 };
 
-const DEFAULT_SIGNER_URL = "https://signer.pymthouse.com";
+const TOKEN_EXCHANGE_GRANT =
+  "urn:ietf:params:oauth:grant-type:token-exchange";
+const SUBJECT_ACCESS_TOKEN_TYPE =
+  "urn:ietf:params:oauth:token-type:access_token";
+const REQUESTED_ACCESS_TOKEN_TYPE =
+  "urn:ietf:params:oauth:token-type:access_token";
 
 /**
- * Prefer an explicit signer base URL, then `PYMTHOUSE_SIGNER_URL` / `SIGNER_URL`,
- * then the public PymtHouse signer.
+ * Prefer an explicit signer base URL from the exchange, then env.
+ * Does not invent a host — a wrong default (e.g. prod DMZ + staging token) causes
+ * generate-live-payment 401s from the identity webhook.
  */
 export function resolveSignerUrl(preferred?: string | null): string {
   const fromArg = preferred?.trim() || "";
@@ -87,7 +93,10 @@ export function resolveSignerUrl(preferred?: string | null): string {
   if (fromEnv) {
     return absoluteHttpUrl(fromEnv, "signer_url").toString();
   }
-  return absoluteHttpUrl(DEFAULT_SIGNER_URL, "signer_url").toString();
+  throw new PmtHouseError(
+    "signer_url is required (exchange/routing omitted it and PYMTHOUSE_SIGNER_URL is unset)",
+    { status: 502, code: "missing_signer_url" },
+  );
 }
 
 function absoluteHttpUrl(raw: string, field: string): URL {
@@ -207,16 +216,35 @@ export async function mintOwnerSignerSession(): Promise<OwnerSignerSession> {
 }
 
 /**
- * Mint a per-end-user SignerSession (short-lived opaque/JWT) for browser studio jobs.
- * Discovery prefers env pin, then token `discovery_url`, then `{signer_url}/discover-orchestrators`.
+ * Mint a per-end-user opaque SignerSession (`pmth_*`) for browser studio jobs.
+ *
+ * Important: `@pymthouse/builder-sdk` `mintUserSignerSessionToken` sets
+ * `resource = issuer` (signer-JWT path) and `tokenEndpointResponseToExchange`
+ * drops `signer_url` / `discovery_url`. We exchange with **no** `resource`
+ * (documented opaque gateway path) and parse the raw token JSON so the real
+ * DMZ `signer_url` is preserved for generate-live-payment.
+ *
+ * Discovery prefers env pin, then token `discovery_url`, then
+ * `{signer_url}/discover-orchestrators`.
  */
 export async function mintUserSignerSession(externalUserId: string): Promise<UserSignerSession> {
+  await ensureAppUserProvisioned(externalUserId);
   const client = createPmtHouseClient();
-  const exchanged = await client.mintUserSignerSessionToken({
+  const userToken = await client.mintUserAccessToken({
     externalUserId,
     scope: SIGN_JOB_SCOPE,
   });
-  const accessToken = exchanged.access_token?.trim() || "";
+  const userJwt = userToken.access_token?.trim() || "";
+  if (!userJwt) {
+    throw new PmtHouseError("User JWT mint returned no access_token", {
+      status: 502,
+      code: "invalid_token_response",
+    });
+  }
+
+  const exchanged = await exchangeUserJwtForOpaqueSignerSession(userJwt);
+  const accessToken =
+    typeof exchanged.access_token === "string" ? exchanged.access_token.trim() : "";
   if (!accessToken) {
     throw new PmtHouseError("SignerSession mint returned no access_token", {
       status: 502,
@@ -224,19 +252,27 @@ export async function mintUserSignerSession(externalUserId: string): Promise<Use
     });
   }
 
+  let signerFromExchange =
+    typeof exchanged.signer_url === "string" ? exchanged.signer_url.trim() : "";
+  if (!signerFromExchange) {
+    try {
+      const routing = await client.getSignerRouting();
+      signerFromExchange = routing.routing.remoteDmzUrl?.trim() || "";
+    } catch {
+      /* fall through to resolveSignerUrl env */
+    }
+  }
+  const signerUrl = resolveSignerUrl(signerFromExchange || null);
+
   const pinned = process.env.NEXT_PUBLIC_ORCH_DISCOVERY_URL?.trim() || "";
   let discoveryUrl = "";
   if (pinned) {
     discoveryUrl = absoluteHttpUrl(pinned, "NEXT_PUBLIC_ORCH_DISCOVERY_URL").toString();
   } else {
     try {
-      const body: Record<string, unknown> = { ...exchanged };
-      discoveryUrl = discoveryUrlFromSignerSession(body);
+      discoveryUrl = discoveryUrlFromSignerSession(exchanged);
     } catch {
-      discoveryUrl = absoluteHttpUrl(
-        "https://ai1.eliteencoder.net:8936/discovery",
-        "default_discovery_url",
-      ).toString();
+      discoveryUrl = discoverOrchestratorsUrlFromSigner(signerUrl);
     }
   }
 
@@ -244,12 +280,73 @@ export async function mintUserSignerSession(externalUserId: string): Promise<Use
     accessToken,
     tokenType: "Bearer",
     expiresIn: Number(exchanged.expires_in) || 0,
-    scope: typeof exchanged.scope === "string" ? exchanged.scope : SIGN_JOB_SCOPE,
-    signerUrl: resolveSignerUrl(
-      typeof exchanged.signer_url === "string" ? exchanged.signer_url : null,
-    ),
+    scope:
+      typeof exchanged.scope === "string" && exchanged.scope.trim()
+        ? exchanged.scope.trim()
+        : SIGN_JOB_SCOPE,
+    signerUrl,
     discoveryUrl,
   };
+}
+
+/**
+ * RFC 8693 token exchange without `resource` → opaque `pmth_*` gateway session.
+ * Parses raw JSON so `signer_url` / `discovery_url` survive (unlike the SDK mapper).
+ */
+async function exchangeUserJwtForOpaqueSignerSession(
+  userJwt: string,
+): Promise<Record<string, unknown>> {
+  const config = readPymthouseM2mConfig();
+  if (!config) {
+    throw new PmtHouseError(
+      "Pymthouse is not configured. Set PYMTHOUSE_ISSUER_URL, PYMTHOUSE_M2M_CLIENT_ID, and PYMTHOUSE_M2M_CLIENT_SECRET.",
+      { status: 503, code: "pymthouse_required" },
+    );
+  }
+
+  const as = await loadAuthorizationServer(config.issuerUrl, fetch, {
+    allowInsecureHttp: config.allowInsecureHttp,
+  });
+  const tokenEndpoint = as.token_endpoint;
+  if (!tokenEndpoint) {
+    throw new PmtHouseError("OIDC discovery document is missing token_endpoint", {
+      status: 500,
+      code: "oidc_discovery_invalid",
+    });
+  }
+
+  const response = await fetch(tokenEndpoint, {
+    method: "POST",
+    headers: {
+      Authorization: m2mAuthHeader(),
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
+    },
+    body: new URLSearchParams({
+      grant_type: TOKEN_EXCHANGE_GRANT,
+      subject_token: userJwt,
+      subject_token_type: SUBJECT_ACCESS_TOKEN_TYPE,
+      requested_token_type: REQUESTED_ACCESS_TOKEN_TYPE,
+      scope: SIGN_JOB_SCOPE,
+    }).toString(),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new PmtHouseError(text || "SignerSession exchange failed", {
+      status: response.status,
+      code: "signer_session_failed",
+    });
+  }
+
+  const parsed: unknown = await response.json();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new PmtHouseError("SignerSession exchange returned invalid JSON", {
+      status: 502,
+      code: "invalid_token_response",
+    });
+  }
+  return parsed as Record<string, unknown>;
 }
 
 export function pymthouseAppsOrigin(): string {
