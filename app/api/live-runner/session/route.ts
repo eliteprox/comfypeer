@@ -5,6 +5,7 @@ import {
   stopComfySession,
   type PaymentHandle,
 } from "@/lib/live-runner-session";
+import { resolveSignerUrl } from "@/lib/pymthouse";
 import { requireSessionUserId, sessionUserIdFromRequest } from "@/lib/session";
 
 export const runtime = "nodejs";
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest) {
     const reserved = await reserveComfySession({
       accessToken: body?.access_token || "",
       discoveryUrl: body?.discovery_url || "",
-      signerUrl: body?.signer_url || "",
+      signerUrl: resolveSignerUrl(body?.signer_url),
     });
     return withCors(request, NextResponse.json(reserved));
   } catch (err) {

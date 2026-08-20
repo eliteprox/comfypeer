@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
         token_type: session.tokenType,
         expires_in: session.expiresIn,
         scope: session.scope,
-        signer_url: session.signerUrl ?? null,
+        signer_url: session.signerUrl,
         discovery_url: session.discoveryUrl,
       }),
     );

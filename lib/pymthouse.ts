@@ -64,9 +64,31 @@ export type UserSignerSession = {
   tokenType: "Bearer";
   expiresIn: number;
   scope: string;
-  signerUrl?: string;
+  /** Always set — mint response, else env / default. */
+  signerUrl: string;
   discoveryUrl: string;
 };
+
+const DEFAULT_SIGNER_URL = "https://signer.pymthouse.com";
+
+/**
+ * Prefer an explicit signer base URL, then `PYMTHOUSE_SIGNER_URL` / `SIGNER_URL`,
+ * then the public PymtHouse signer.
+ */
+export function resolveSignerUrl(preferred?: string | null): string {
+  const fromArg = preferred?.trim() || "";
+  if (fromArg) {
+    return absoluteHttpUrl(fromArg, "signer_url").toString();
+  }
+  const fromEnv =
+    process.env.PYMTHOUSE_SIGNER_URL?.trim() ||
+    process.env.SIGNER_URL?.trim() ||
+    "";
+  if (fromEnv) {
+    return absoluteHttpUrl(fromEnv, "signer_url").toString();
+  }
+  return absoluteHttpUrl(DEFAULT_SIGNER_URL, "signer_url").toString();
+}
 
 function absoluteHttpUrl(raw: string, field: string): URL {
   let parsed: URL;
@@ -223,7 +245,9 @@ export async function mintUserSignerSession(externalUserId: string): Promise<Use
     tokenType: "Bearer",
     expiresIn: Number(exchanged.expires_in) || 0,
     scope: typeof exchanged.scope === "string" ? exchanged.scope : SIGN_JOB_SCOPE,
-    signerUrl: exchanged.signer_url?.trim() || undefined,
+    signerUrl: resolveSignerUrl(
+      typeof exchanged.signer_url === "string" ? exchanged.signer_url : null,
+    ),
     discoveryUrl,
   };
 }

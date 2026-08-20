@@ -28,7 +28,7 @@ export type ReservedSession = {
 async function reserveSession(opts: {
   accessToken: string;
   discoveryUrl: string;
-  signerUrl: string;
+  signerUrl?: string;
 }): Promise<ReservedSession> {
   const res = await fetch("/api/live-runner/session", {
     method: "POST",
@@ -37,7 +37,9 @@ async function reserveSession(opts: {
     body: JSON.stringify({
       access_token: opts.accessToken,
       discovery_url: opts.discoveryUrl,
-      signer_url: opts.signerUrl,
+      ...(opts.signerUrl?.trim()
+        ? { signer_url: opts.signerUrl.trim() }
+        : {}),
     }),
   });
   if (!res.ok) {
@@ -105,7 +107,8 @@ function grabJpegFrame(
 export async function connectViaWsStream(opts: {
   accessToken: string;
   discoveryUrl: string;
-  signerUrl: string;
+  /** Optional — BFF fills from env when omitted. */
+  signerUrl?: string;
   prompts: unknown;
   width?: number;
   height?: number;
@@ -122,10 +125,6 @@ export async function connectViaWsStream(opts: {
   const height = opts.height ?? 512;
   const fps = opts.fps ?? 8;
   const jpegQuality = opts.jpegQuality ?? 0.7;
-  const signerUrl = opts.signerUrl?.trim();
-  if (!signerUrl) {
-    throw new Error("signer_url is required for paid live-runner sessions");
-  }
 
   opts.onConnectionState?.("reserving");
   const discoveryUrl =
@@ -133,7 +132,7 @@ export async function connectViaWsStream(opts: {
   const reserved = await reserveSession({
     accessToken: opts.accessToken,
     discoveryUrl,
-    signerUrl,
+    signerUrl: opts.signerUrl?.trim() || undefined,
   });
 
   opts.onConnectionState?.("connecting");

@@ -4,6 +4,7 @@ import {
   tickSessionPayment,
   type PaymentHandle,
 } from "@/lib/live-runner-session";
+import { resolveSignerUrl } from "@/lib/pymthouse";
 import { sessionUserIdFromRequest } from "@/lib/session";
 
 export const runtime = "nodejs";
@@ -49,9 +50,13 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const paymentHandle: PaymentHandle = {
+      ...body.payment,
+      signer_url: resolveSignerUrl(body.payment.signer_url),
+    };
     const payment = await tickSessionPayment({
       accessToken: body.access_token,
-      payment: body.payment,
+      payment: paymentHandle,
     });
     return withCors(request, NextResponse.json({ payment }));
   } catch (err) {

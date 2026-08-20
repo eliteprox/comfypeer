@@ -27,6 +27,7 @@ export function readSignerSession(): BrowserSignerSession | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as BrowserSignerSession;
     if (!parsed?.access_token || !parsed?.discovery_url) return null;
+    if (!parsed.signer_url?.trim()) return null;
     return parsed;
   } catch {
     return null;
@@ -58,12 +59,16 @@ export async function mintBrowserSignerSession(
     throw new Error(body?.error || `signer-session failed (${res.status})`);
   }
   const data = (await res.json()) as Omit<BrowserSignerSession, "stored_at">;
+  const signerUrl = data.signer_url?.trim() || "";
+  if (!data.access_token?.trim() || !data.discovery_url?.trim() || !signerUrl) {
+    throw new Error("signer-session response missing access_token, discovery_url, or signer_url");
+  }
   const envelope: BrowserSignerSession = {
     access_token: data.access_token,
     token_type: "Bearer",
     expires_in: Number(data.expires_in) || 0,
     scope: data.scope,
-    signer_url: data.signer_url,
+    signer_url: signerUrl,
     discovery_url: data.discovery_url,
     stored_at: Date.now(),
   };
