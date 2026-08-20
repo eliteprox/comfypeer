@@ -74,6 +74,8 @@ export function StreamStudio({ pipelineId, resId }: Props) {
   const sessionCloseRef = useRef<(() => Promise<void>) | null>(null);
   const startedAtRef = useRef<number | null>(null);
   const accruedRef = useRef(0);
+  const inputTicksRef = useRef<number[]>([]);
+  const outputTicksRef = useRef<number[]>([]);
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [inputSource, setInputSource] = useState<InputSource>("clip");
@@ -81,6 +83,8 @@ export function StreamStudio({ pipelineId, resId }: Props) {
   const [cost, setCost] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [connState, setConnState] = useState<string>("—");
+  const [inputFps, setInputFps] = useState(0);
+  const [outputFps, setOutputFps] = useState(0);
 
   const pipeline = PIPELINES.find((p) => p.id === pipelineId) ?? PIPELINES[0]!;
   const res = RESOLUTION_PRESETS.find((r) => r.id === resId) ?? RESOLUTION_PRESETS[0]!;
@@ -91,10 +95,15 @@ export function StreamStudio({ pipelineId, resId }: Props) {
     if (phase !== "live") return;
     const id = window.setInterval(() => {
       if (startedAtRef.current == null) return;
-      const secs =
-        (performance.now() - startedAtRef.current) / 1000 + accruedRef.current;
+      const now = performance.now();
+      const secs = (now - startedAtRef.current) / 1000 + accruedRef.current;
       setElapsed(secs);
       setCost(secs * rate);
+      const cutoff = now - 1000;
+      inputTicksRef.current = inputTicksRef.current.filter((t) => t > cutoff);
+      outputTicksRef.current = outputTicksRef.current.filter((t) => t > cutoff);
+      setInputFps(inputTicksRef.current.length);
+      setOutputFps(outputTicksRef.current.length);
     }, 200);
     return () => window.clearInterval(id);
   }, [phase, rate]);
@@ -125,6 +134,10 @@ export function StreamStudio({ pipelineId, resId }: Props) {
     }
     setPhase("idle");
     setConnState("—");
+    inputTicksRef.current = [];
+    outputTicksRef.current = [];
+    setInputFps(0);
+    setOutputFps(0);
   }, []);
 
   const ensureSampleClip = useCallback(async (): Promise<MediaStream> => {
@@ -253,6 +266,12 @@ export function StreamStudio({ pipelineId, resId }: Props) {
             void teardown();
           }
         },
+        onInputFrame: () => {
+          inputTicksRef.current.push(performance.now());
+        },
+        onOutputFrame: () => {
+          outputTicksRef.current.push(performance.now());
+        },
       });
       sessionCloseRef.current = session.close;
     } catch (err) {
@@ -289,14 +308,28 @@ export function StreamStudio({ pipelineId, resId }: Props) {
   return (
     <div className="space-y-3">
       <div className="grid gap-3 lg:grid-cols-2">
-        <VideoPreview label="Input" videoRef={localVideoRef} />
-        <CanvasPreview label="Output" canvasRef={remoteCanvasRef} />
+        <VideoPreview
+          label="Input"
+          fps={inputFps}
+          videoRef={localVideoRef}
+        />
+        <CanvasPreview
+          label="Output"
+          fps={outputFps}
+          canvasRef={remoteCanvasRef}
+        />
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-xs font-mono text-muted">
         <span>
           input{" "}
           <span className="text-fg">{inputSource === "clip" ? "clip" : "camera"}</span>
+        </span>
+        <span>
+          in <span className="text-fg">{formatFps(inputFps)}</span>
+        </span>
+        <span>
+          out <span className="text-fg">{formatFps(outputFps)}</span>
         </span>
         <span>
           elapsed <span className="text-fg">{formatSecs(elapsed)}</span>
@@ -397,17 +430,32 @@ export function StreamStudio({ pipelineId, resId }: Props) {
   );
 }
 
+function formatFps(fps: number): string {
+  return `${fps.toFixed(0)} fps`;
+}
+
+function PreviewFps({ fps }: { fps: number }) {
+  return (
+    <span className="font-mono normal-case tracking-normal text-fg">
+      {formatFps(fps)}
+    </span>
+  );
+}
+
 function VideoPreview({
   label,
+  fps,
   videoRef,
 }: {
   label: string;
+  fps: number;
   videoRef: React.RefObject<HTMLVideoElement | null>;
 }) {
   return (
     <div className="overflow-hidden rounded-md border border-border bg-elevated">
       <div className="flex items-center justify-between border-b border-border px-2 py-1 text-[11px] uppercase tracking-wide text-muted">
-        {label}
+        <span>{label}</span>
+        <PreviewFps fps={fps} />
       </div>
       <video
         ref={videoRef}
@@ -422,15 +470,18 @@ function VideoPreview({
 
 function CanvasPreview({
   label,
+  fps,
   canvasRef,
 }: {
   label: string;
+  fps: number;
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
 }) {
   return (
     <div className="overflow-hidden rounded-md border border-border bg-elevated">
       <div className="flex items-center justify-between border-b border-border px-2 py-1 text-[11px] uppercase tracking-wide text-muted">
-        {label}
+        <span>{label}</span>
+        <PreviewFps fps={fps} />
       </div>
       <canvas
         ref={canvasRef}

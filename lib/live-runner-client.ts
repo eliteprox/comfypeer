@@ -137,6 +137,10 @@ export async function connectViaWsStream(opts: {
   jpegQuality?: number;
   onConnectionState?: (state: string) => void;
   onReady?: (info: { session: string; modalities?: unknown }) => void;
+  /** Fired after a JPEG is sent upstream. */
+  onInputFrame?: () => void;
+  /** Fired after a processed JPEG is painted on `outputCanvas`. */
+  onOutputFrame?: () => void;
 }): Promise<{ close: () => Promise<void> }> {
   const width = opts.width ?? 512;
   const height = opts.height ?? 512;
@@ -269,6 +273,7 @@ export async function connectViaWsStream(opts: {
       opts.outputCanvas.height = img.height;
       outCtx.drawImage(img, 0, 0);
       URL.revokeObjectURL(url);
+      opts.onOutputFrame?.();
     };
     img.onerror = () => URL.revokeObjectURL(url);
     img.src = url;
@@ -286,6 +291,7 @@ export async function connectViaWsStream(opts: {
       .then(async (blob) => {
         if (closed || ws.readyState !== WebSocket.OPEN) return;
         ws.send(await blob.arrayBuffer());
+        opts.onInputFrame?.();
       })
       .catch(() => null);
   }, intervalMs);
