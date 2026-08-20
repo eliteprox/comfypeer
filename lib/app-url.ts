@@ -2,5 +2,17 @@
 export const DEFAULT_APP_BASE_URL = "http://localhost:3000";
 
 export function appBaseUrl(): string {
-  return process.env.NEXT_PUBLIC_APP_URL?.trim() || DEFAULT_APP_BASE_URL;
+  return (process.env.NEXT_PUBLIC_APP_URL?.trim() || DEFAULT_APP_BASE_URL).replace(
+    /\/$/,
+    "",
+  );
+}
+
+/** Absolute public origin used as Auth0 `post_logout_redirect_uri` via `returnTo`. */
+export function publicNextUrl(): string {
+  return appBaseUrl();
+}
+
+export function authLogoutHref(): string {
+  return `/auth/logout?returnTo=${encodeURIComponent(publicNextUrl())}`;
 }

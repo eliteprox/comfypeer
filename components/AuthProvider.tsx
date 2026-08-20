@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { useUser } from "@auth0/nextjs-auth0/client";
+import { authLogoutHref } from "@/lib/app-url";
 import { isValidEmail } from "@/lib/email";
 
 export type ComfyUser = {
@@ -142,7 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       /* ignore */
     }
-    window.location.assign("/auth/logout");
+    window.location.assign(authLogoutHref());
   }, []);
 
   const value = useMemo(
