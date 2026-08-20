@@ -27,9 +27,11 @@ type Props = {
 };
 
 function bridgeUrl(): string {
+  // Must be HTTPS when the app is served over HTTPS (mixed-content blocks http://
+  // except loopback). Prefer env; fall back to the public tunnel/bridge host.
   return (
     process.env.NEXT_PUBLIC_WEBRTC_BRIDGE_URL?.trim() ||
-    "http://127.0.0.1:8890"
+    "https://match-border-prominent-horn.trycloudflare.com"
   );
 }
 
