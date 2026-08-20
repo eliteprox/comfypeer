@@ -59,6 +59,15 @@ export type OwnerSignerSession = {
   discoveryUrl: string;
 };
 
+export type UserSignerSession = {
+  accessToken: string;
+  tokenType: "Bearer";
+  expiresIn: number;
+  scope: string;
+  signerUrl?: string;
+  discoveryUrl: string;
+};
+
 function absoluteHttpUrl(raw: string, field: string): URL {
   let parsed: URL;
   try {
@@ -172,6 +181,50 @@ export async function mintOwnerSignerSession(): Promise<OwnerSignerSession> {
   return {
     accessToken,
     discoveryUrl: discoveryUrlFromSignerSession(body),
+  };
+}
+
+/**
+ * Mint a per-end-user SignerSession (short-lived opaque/JWT) for browser studio jobs.
+ * Discovery prefers env pin, then token `discovery_url`, then `{signer_url}/discover-orchestrators`.
+ */
+export async function mintUserSignerSession(externalUserId: string): Promise<UserSignerSession> {
+  const client = createPmtHouseClient();
+  const exchanged = await client.mintUserSignerSessionToken({
+    externalUserId,
+    scope: SIGN_JOB_SCOPE,
+  });
+  const accessToken = exchanged.access_token?.trim() || "";
+  if (!accessToken) {
+    throw new PmtHouseError("SignerSession mint returned no access_token", {
+      status: 502,
+      code: "invalid_token_response",
+    });
+  }
+
+  const pinned = process.env.NEXT_PUBLIC_ORCH_DISCOVERY_URL?.trim() || "";
+  let discoveryUrl = "";
+  if (pinned) {
+    discoveryUrl = absoluteHttpUrl(pinned, "NEXT_PUBLIC_ORCH_DISCOVERY_URL").toString();
+  } else {
+    try {
+      const body: Record<string, unknown> = { ...exchanged };
+      discoveryUrl = discoveryUrlFromSignerSession(body);
+    } catch {
+      discoveryUrl = absoluteHttpUrl(
+        "https://ai1.eliteencoder.net:8936/discovery",
+        "default_discovery_url",
+      ).toString();
+    }
+  }
+
+  return {
+    accessToken,
+    tokenType: "Bearer",
+    expiresIn: Number(exchanged.expires_in) || 0,
+    scope: typeof exchanged.scope === "string" ? exchanged.scope : SIGN_JOB_SCOPE,
+    signerUrl: exchanged.signer_url?.trim() || undefined,
+    discoveryUrl,
   };
 }
 

@@ -15,7 +15,8 @@ export default function DocsPage() {
         <h2 className="text-lg font-semibold text-fg">1. Sign up</h2>
         <p className="text-sm text-muted">
           Create an account at <Link href="/signup" className="text-cool hover:underline">/signup</Link>.
-          We provision a PymtHouse end-user and mint a user JWT server-side (never in the browser).
+          We provision a PymtHouse end-user. The studio mints a short-lived SignerSession JWT into
+          the browser session for authenticated Livepeer jobs.
         </p>
       </section>
 
