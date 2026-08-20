@@ -50,26 +50,45 @@ function originOf(url: string): string {
 /**
  * Prefer an explicit live-runner orch discovery pin over SignerSession /
  * `{signer}/discover-orchestrators`, which historically omit app=comfystream.
+ *
+ * Do **not** reuse NEXT_PUBLIC_ORCH_DISCOVERY_URL here: staging often sets that
+ * to a daydream/pymthouse orch (self-signed TLS, no comfystream runners), which
+ * surfaces as opaque undici "fetch failed" from the Vercel BFF.
  */
 export function resolveLiveRunnerDiscoveryUrl(requested?: string | null): string {
-  const pinned =
-    process.env.NEXT_PUBLIC_ORCH_DISCOVERY_URL?.trim() ||
-    process.env.ORCH_DISCOVERY_URL?.trim() ||
-    "";
-  if (pinned) {
-    return new URL(pinned).toString();
-  }
+  const candidates = [
+    process.env.LIVE_RUNNER_DISCOVERY_URL?.trim() || "",
+    process.env.ORCH_DISCOVERY_URL?.trim() || "",
+    "",
+  ];
   const orch = process.env.ORCH_URL?.trim() || "";
   if (orch) {
-    const u = new URL(orch);
-    u.pathname = "/discovery";
-    u.search = "";
-    u.hash = "";
-    return u.toString();
+    try {
+      const u = new URL(orch);
+      u.pathname = "/discovery";
+      u.search = "";
+      u.hash = "";
+      candidates.push(u.toString());
+    } catch {
+      /* ignore invalid ORCH_URL */
+    }
   }
-  const fromClient = requested?.trim() || "";
-  if (fromClient) {
-    return new URL(fromClient).toString();
+  if (requested?.trim()) {
+    candidates.push(requested.trim());
+  }
+  candidates.push(DEFAULT_COMFYSTREAM_DISCOVERY_URL);
+
+  for (const raw of candidates) {
+    if (!raw) continue;
+    try {
+      const url = new URL(raw).toString();
+      if (new URL(url).hostname.toLowerCase().endsWith("daydream.monster")) {
+        continue;
+      }
+      return url;
+    } catch {
+      /* try next */
+    }
   }
   return DEFAULT_COMFYSTREAM_DISCOVERY_URL;
 }

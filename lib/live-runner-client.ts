@@ -146,11 +146,11 @@ export async function connectViaWsStream(opts: {
   }
 
   opts.onConnectionState?.("reserving");
-  const discoveryUrl =
-    process.env.NEXT_PUBLIC_ORCH_DISCOVERY_URL?.trim() || opts.discoveryUrl;
+  // Server BFF resolves the live-runner orch; do not prefer
+  // NEXT_PUBLIC_ORCH_DISCOVERY_URL (often a non-comfystream / bad-TLS host).
   const reserved = await reserveSession({
     accessToken: opts.accessToken,
-    discoveryUrl,
+    discoveryUrl: opts.discoveryUrl,
     signerUrl,
   });
 

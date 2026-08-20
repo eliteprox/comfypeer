@@ -28,9 +28,10 @@ export async function OPTIONS(request: NextRequest) {
  * Reserve a comfystream live-runner session for browser WebSocket streaming.
  * Body: { access_token, discovery_url, signer_url }
  *
- * Discovery prefers NEXT_PUBLIC_ORCH_DISCOVERY_URL / ORCH_DISCOVERY_URL /
- * ORCH_URL+/discovery over the client URL (SignerSession discover-orchestrators
- * does not list comfystream).
+ * Discovery prefers LIVE_RUNNER_DISCOVERY_URL / ORCH_DISCOVERY_URL /
+ * ORCH_URL+/discovery, then the client URL, then ai1 (skips daydream.monster
+ * pins that break Node TLS). SignerSession discover-orchestrators does not
+ * list comfystream.
  */
 export async function POST(request: NextRequest) {
   if (!isAllowedBrowserMutation(request)) {
