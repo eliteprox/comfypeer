@@ -128,9 +128,11 @@ export async function connectViaWsStream(opts: {
   }
 
   opts.onConnectionState?.("reserving");
+  const discoveryUrl =
+    process.env.NEXT_PUBLIC_ORCH_DISCOVERY_URL?.trim() || opts.discoveryUrl;
   const reserved = await reserveSession({
     accessToken: opts.accessToken,
-    discoveryUrl: opts.discoveryUrl,
+    discoveryUrl,
     signerUrl,
   });
 
