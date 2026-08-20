@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, Pause, Play, Square } from "lucide-react";
+import { Camera, Film, Pause, Play, Square } from "lucide-react";
 import { Button } from "@/components/Button";
 import { connectViaBridge } from "@/lib/live-runner-client";
 import { ensureBrowserSignerSession } from "@/lib/signer-session-browser";
@@ -19,7 +19,12 @@ const WORKFLOWS: Record<string, unknown> = {
   "invert-color-av-passthrough-api.json": invertColorAv,
 };
 
+/** Same CC0 sample used by the previous LiveDemoWidget. */
+const SAMPLE_CLIP_URL =
+  "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4";
+
 type Phase = "idle" | "connecting" | "live" | "paused";
+type InputSource = "clip" | "camera";
 
 type Props = {
   pipelineId: string;
@@ -35,15 +40,52 @@ function bridgeUrl(): string {
   );
 }
 
+function captureVideoStream(video: HTMLVideoElement): MediaStream {
+  const withCapture = video as HTMLVideoElement & {
+    captureStream?: () => MediaStream;
+    mozCaptureStream?: () => MediaStream;
+  };
+  const stream =
+    withCapture.captureStream?.() ?? withCapture.mozCaptureStream?.();
+  if (!stream) {
+    throw new Error("This browser cannot capture a MediaStream from a video clip");
+  }
+  return stream;
+}
+
+/** Sample clip is video-only; bridge / AV workflows still expect an audio track. */
+function attachSilentAudio(
+  stream: MediaStream,
+  audioCtxRef: { current: AudioContext | null },
+): MediaStream {
+  if (stream.getAudioTracks().length > 0) return stream;
+  const ctx = new AudioContext();
+  const oscillator = ctx.createOscillator();
+  const gain = ctx.createGain();
+  gain.gain.value = 0;
+  const dest = ctx.createMediaStreamDestination();
+  oscillator.connect(gain);
+  gain.connect(dest);
+  oscillator.start();
+  for (const track of dest.stream.getAudioTracks()) {
+    stream.addTrack(track);
+  }
+  audioCtxRef.current?.close().catch(() => null);
+  audioCtxRef.current = ctx;
+  return stream;
+}
+
 export function StreamStudio({ pipelineId, resId }: Props) {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const clipAudioCtxRef = useRef<AudioContext | null>(null);
   const sessionCloseRef = useRef<(() => Promise<void>) | null>(null);
   const startedAtRef = useRef<number | null>(null);
   const accruedRef = useRef(0);
 
   const [phase, setPhase] = useState<Phase>("idle");
+  const [inputSource, setInputSource] = useState<InputSource>("clip");
   const [elapsed, setElapsed] = useState(0);
   const [cost, setCost] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -66,10 +108,13 @@ export function StreamStudio({ pipelineId, resId }: Props) {
     return () => window.clearInterval(id);
   }, [phase, rate]);
 
-  const stopCamera = useCallback(() => {
+  const clearLocalStream = useCallback(() => {
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
-    if (localVideoRef.current) localVideoRef.current.srcObject = null;
+    if (clipAudioCtxRef.current) {
+      void clipAudioCtxRef.current.close().catch(() => null);
+      clipAudioCtxRef.current = null;
+    }
   }, []);
 
   const teardown = useCallback(async () => {
@@ -87,15 +132,51 @@ export function StreamStudio({ pipelineId, resId }: Props) {
     setConnState("—");
   }, []);
 
-  useEffect(() => {
-    return () => {
-      void teardown();
-      stopCamera();
-    };
-  }, [teardown, stopCamera]);
+  const ensureSampleClip = useCallback(async (): Promise<MediaStream> => {
+    const video = localVideoRef.current;
+    if (!video) throw new Error("Input video element missing");
 
-  const ensureCamera = useCallback(async () => {
-    if (localStreamRef.current) return localStreamRef.current;
+    clearLocalStream();
+    video.srcObject = null;
+    video.crossOrigin = "anonymous";
+    video.loop = true;
+    video.muted = true;
+    video.playsInline = true;
+    if (video.src !== SAMPLE_CLIP_URL) {
+      video.src = SAMPLE_CLIP_URL;
+      await new Promise<void>((resolve, reject) => {
+        const onReady = () => {
+          cleanup();
+          resolve();
+        };
+        const onError = () => {
+          cleanup();
+          reject(new Error("Failed to load sample clip"));
+        };
+        const cleanup = () => {
+          video.removeEventListener("loadeddata", onReady);
+          video.removeEventListener("error", onError);
+        };
+        video.addEventListener("loadeddata", onReady, { once: true });
+        video.addEventListener("error", onError, { once: true });
+        video.load();
+      });
+    }
+    await video.play();
+    const stream = attachSilentAudio(captureVideoStream(video), clipAudioCtxRef);
+    localStreamRef.current = stream;
+    setInputSource("clip");
+    return stream;
+  }, [clearLocalStream]);
+
+  const ensureCamera = useCallback(async (): Promise<MediaStream> => {
+    clearLocalStream();
+    const video = localVideoRef.current;
+    if (video) {
+      video.removeAttribute("src");
+      video.srcObject = null;
+      video.load();
+    }
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: "user",
@@ -105,12 +186,31 @@ export function StreamStudio({ pipelineId, resId }: Props) {
       audio: true,
     });
     localStreamRef.current = stream;
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = stream;
-      await localVideoRef.current.play().catch(() => null);
+    if (video) {
+      video.srcObject = stream;
+      await video.play().catch(() => null);
     }
+    setInputSource("camera");
     return stream;
-  }, [res.width, res.height]);
+  }, [clearLocalStream, res.width, res.height]);
+
+  const ensureLocalStream = useCallback(async () => {
+    if (inputSource === "camera") return ensureCamera();
+    return ensureSampleClip();
+  }, [inputSource, ensureCamera, ensureSampleClip]);
+
+  // Default preview: looping sample clip (same as LiveDemoWidget).
+  useEffect(() => {
+    if (phase !== "idle") return;
+    void ensureSampleClip().catch(() => null);
+  }, [phase, ensureSampleClip]);
+
+  useEffect(() => {
+    return () => {
+      void teardown();
+      clearLocalStream();
+    };
+  }, [teardown, clearLocalStream]);
 
   const start = useCallback(async () => {
     setError(null);
@@ -128,7 +228,7 @@ export function StreamStudio({ pipelineId, resId }: Props) {
 
     setPhase("connecting");
     try {
-      const local = await ensureCamera();
+      const local = await ensureLocalStream();
       const signer = await ensureBrowserSignerSession("");
       const session = await connectViaBridge({
         bridgeUrl: bridgeUrl(),
@@ -167,27 +267,31 @@ export function StreamStudio({ pipelineId, resId }: Props) {
       setError(err instanceof Error ? err.message : "Failed to start stream");
       await teardown();
     }
-  }, [runnable, pipeline, ensureCamera, res.width, res.height, teardown]);
+  }, [runnable, pipeline, ensureLocalStream, res.width, res.height, teardown]);
 
   const pause = useCallback(() => {
     localStreamRef.current?.getTracks().forEach((t) => {
       t.enabled = false;
     });
+    const video = localVideoRef.current;
+    if (inputSource === "clip" && video) video.pause();
     if (startedAtRef.current != null) {
       accruedRef.current +=
         (performance.now() - startedAtRef.current) / 1000;
       startedAtRef.current = null;
     }
     setPhase("paused");
-  }, []);
+  }, [inputSource]);
 
   const resume = useCallback(() => {
     localStreamRef.current?.getTracks().forEach((t) => {
       t.enabled = true;
     });
+    const video = localVideoRef.current;
+    if (inputSource === "clip" && video) void video.play().catch(() => null);
     startedAtRef.current = performance.now();
     setPhase("live");
-  }, []);
+  }, [inputSource]);
 
   return (
     <div className="space-y-3">
@@ -197,6 +301,10 @@ export function StreamStudio({ pipelineId, resId }: Props) {
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-xs font-mono text-muted">
+        <span>
+          input{" "}
+          <span className="text-fg">{inputSource === "clip" ? "clip" : "camera"}</span>
+        </span>
         <span>
           elapsed <span className="text-fg">{formatSecs(elapsed)}</span>
         </span>
@@ -264,18 +372,32 @@ export function StreamStudio({ pipelineId, resId }: Props) {
           </Button>
         ) : null}
         {phase === "idle" ? (
-          <Button
-            type="button"
-            variant="secondary"
-            className="!py-1.5 text-sm"
-            onClick={() => {
-              void ensureCamera().catch((err) =>
-                setError(err instanceof Error ? err.message : "Camera failed"),
-              );
-            }}
-          >
-            <Camera className="h-3.5 w-3.5" strokeWidth={1.5} /> Preview camera
-          </Button>
+          <>
+            <Button
+              type="button"
+              variant={inputSource === "clip" ? "primary" : "secondary"}
+              className="!py-1.5 text-sm"
+              onClick={() => {
+                void ensureSampleClip().catch((err) =>
+                  setError(err instanceof Error ? err.message : "Clip failed"),
+                );
+              }}
+            >
+              <Film className="h-3.5 w-3.5" strokeWidth={1.5} /> Sample clip
+            </Button>
+            <Button
+              type="button"
+              variant={inputSource === "camera" ? "primary" : "secondary"}
+              className="!py-1.5 text-sm"
+              onClick={() => {
+                void ensureCamera().catch((err) =>
+                  setError(err instanceof Error ? err.message : "Camera failed"),
+                );
+              }}
+            >
+              <Camera className="h-3.5 w-3.5" strokeWidth={1.5} /> Camera
+            </Button>
+          </>
         ) : null}
       </div>
     </div>
