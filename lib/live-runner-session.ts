@@ -2,6 +2,10 @@ import "server-only";
 
 const APP_ID = "comfystream";
 
+/** Staging orch that advertises the comfystream live-runner (not in pymthouse discover-orchestrators). */
+const DEFAULT_COMFYSTREAM_DISCOVERY_URL =
+  "https://ai1.eliteencoder.net:8936/discovery";
+
 export type ReservedLiveSession = {
   session_id: string;
   app_url: string;
@@ -30,9 +34,52 @@ type DiscoveryOrch = {
   runners?: DiscoveryRunner[];
 };
 
+type DiscoveryScan = {
+  orchCount: number;
+  runnerCount: number;
+  matchingAppCount: number;
+  capacityZeroCount: number;
+  candidates: { runnerUrl: string; orchAddress: string }[];
+};
+
 function originOf(url: string): string {
   const parsed = new URL(url);
   return `${parsed.protocol}//${parsed.host}`;
+}
+
+/**
+ * Prefer an explicit live-runner orch discovery pin over SignerSession /
+ * `{signer}/discover-orchestrators`, which historically omit app=comfystream.
+ */
+export function resolveLiveRunnerDiscoveryUrl(requested?: string | null): string {
+  const pinned =
+    process.env.NEXT_PUBLIC_ORCH_DISCOVERY_URL?.trim() ||
+    process.env.ORCH_DISCOVERY_URL?.trim() ||
+    "";
+  if (pinned) {
+    return new URL(pinned).toString();
+  }
+  const orch = process.env.ORCH_URL?.trim() || "";
+  if (orch) {
+    const u = new URL(orch);
+    u.pathname = "/discovery";
+    u.search = "";
+    u.hash = "";
+    return u.toString();
+  }
+  const fromClient = requested?.trim() || "";
+  if (fromClient) {
+    return new URL(fromClient).toString();
+  }
+  return DEFAULT_COMFYSTREAM_DISCOVERY_URL;
+}
+
+function isSignerDiscoverOrchestratorsUrl(url: string): boolean {
+  try {
+    return new URL(url).pathname.replace(/\/+$/, "").endsWith("/discover-orchestrators");
+  } catch {
+    return false;
+  }
 }
 
 function wsFromHttp(appUrl: string, path: string): string {
@@ -139,10 +186,10 @@ async function generateLivePayment(
   return { payment, segCreds, state };
 }
 
-async function discoverComfyRunners(discoveryUrl: string, accessToken: string): Promise<{
-  runnerUrl: string;
-  orchAddress: string;
-}[]> {
+async function scanDiscovery(
+  discoveryUrl: string,
+  accessToken: string,
+): Promise<DiscoveryScan> {
   const { status, data } = await fetchJson(discoveryUrl, {
     method: "GET",
     headers: {
@@ -151,22 +198,82 @@ async function discoverComfyRunners(discoveryUrl: string, accessToken: string): 
     },
   });
   if (status >= 400) {
-    throw new Error(`discovery failed (${status})`);
+    throw new Error(`discovery failed (${status}) at ${discoveryUrl}`);
   }
   const list = Array.isArray(data) ? (data as DiscoveryOrch[]) : [];
-  const out: { runnerUrl: string; orchAddress: string }[] = [];
+  const scan: DiscoveryScan = {
+    orchCount: list.length,
+    runnerCount: 0,
+    matchingAppCount: 0,
+    capacityZeroCount: 0,
+    candidates: [],
+  };
   for (const orch of list) {
     const address = typeof orch.address === "string" ? orch.address : "";
     for (const runner of orch.runners || []) {
+      scan.runnerCount += 1;
       if (runner.app !== APP_ID) continue;
+      scan.matchingAppCount += 1;
       if (!runner.url) continue;
       if (typeof runner.capacity_available === "number" && runner.capacity_available <= 0) {
+        scan.capacityZeroCount += 1;
         continue;
       }
-      out.push({ runnerUrl: runner.url, orchAddress: address });
+      scan.candidates.push({ runnerUrl: runner.url, orchAddress: address });
     }
   }
-  return out;
+  return scan;
+}
+
+function describeEmptyDiscovery(discoveryUrl: string, scan: DiscoveryScan): string {
+  if (scan.orchCount === 0 && scan.runnerCount === 0) {
+    return `discovery empty (no orchestrators) at ${discoveryUrl}`;
+  }
+  if (scan.matchingAppCount === 0) {
+    return `no matching app "${APP_ID}" in discovery at ${discoveryUrl} (${scan.runnerCount} runners across ${scan.orchCount} orchestrators)`;
+  }
+  if (scan.capacityZeroCount > 0 && scan.candidates.length === 0) {
+    return `app "${APP_ID}" found but capacity_available is 0 at ${discoveryUrl}`;
+  }
+  return `no comfystream runners available at ${discoveryUrl}`;
+}
+
+async function discoverComfyRunners(
+  discoveryUrl: string,
+  accessToken: string,
+): Promise<{ runnerUrl: string; orchAddress: string }[]> {
+  const tried = new Set<string>();
+  const urls: string[] = [discoveryUrl];
+
+  // Signer discover-orchestrators historically omits ai1/comfystream.
+  if (isSignerDiscoverOrchestratorsUrl(discoveryUrl)) {
+    urls.push(resolveLiveRunnerDiscoveryUrl(null));
+  }
+  urls.push(DEFAULT_COMFYSTREAM_DISCOVERY_URL);
+
+  let lastUrl = discoveryUrl;
+  let lastScan: DiscoveryScan | null = null;
+
+  for (const url of urls) {
+    if (tried.has(url)) continue;
+    tried.add(url);
+    const scan = await scanDiscovery(url, accessToken);
+    if (scan.candidates.length > 0) {
+      return scan.candidates;
+    }
+    lastUrl = url;
+    lastScan = scan;
+  }
+
+  throw new Error(
+    describeEmptyDiscovery(lastUrl, lastScan ?? {
+      orchCount: 0,
+      runnerCount: 0,
+      matchingAppCount: 0,
+      capacityZeroCount: 0,
+      candidates: [],
+    }),
+  );
 }
 
 /**
@@ -179,16 +286,13 @@ export async function reserveComfySession(opts: {
   signerUrl: string;
 }): Promise<ReservedLiveSession> {
   const accessToken = opts.accessToken.trim();
-  const discoveryUrl = opts.discoveryUrl.trim();
   const signerUrl = opts.signerUrl.trim();
-  if (!accessToken || !discoveryUrl || !signerUrl) {
-    throw new Error("access_token, discovery_url, and signer_url are required");
+  const discoveryUrl = resolveLiveRunnerDiscoveryUrl(opts.discoveryUrl);
+  if (!accessToken || !signerUrl) {
+    throw new Error("access_token and signer_url are required");
   }
 
   const runners = await discoverComfyRunners(discoveryUrl, accessToken);
-  if (runners.length === 0) {
-    throw new Error("no comfystream runners available");
-  }
 
   const payer = await signerAddress(signerUrl, accessToken);
   let lastError = "all runners failed";

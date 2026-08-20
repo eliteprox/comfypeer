@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { corsHeaders, isAllowedBrowserMutation } from "@/lib/cors";
 import {
   reserveComfySession,
+  resolveLiveRunnerDiscoveryUrl,
   stopComfySession,
   type PaymentHandle,
 } from "@/lib/live-runner-session";
@@ -26,6 +27,10 @@ export async function OPTIONS(request: NextRequest) {
 /**
  * Reserve a comfystream live-runner session for browser WebSocket streaming.
  * Body: { access_token, discovery_url, signer_url }
+ *
+ * Discovery prefers NEXT_PUBLIC_ORCH_DISCOVERY_URL / ORCH_DISCOVERY_URL /
+ * ORCH_URL+/discovery over the client URL (SignerSession discover-orchestrators
+ * does not list comfystream).
  */
 export async function POST(request: NextRequest) {
   if (!isAllowedBrowserMutation(request)) {
@@ -71,7 +76,7 @@ export async function POST(request: NextRequest) {
     }
     const reserved = await reserveComfySession({
       accessToken: body?.access_token || "",
-      discoveryUrl: body?.discovery_url || "",
+      discoveryUrl: resolveLiveRunnerDiscoveryUrl(body?.discovery_url || ""),
       signerUrl,
     });
     return withCors(request, NextResponse.json(reserved));

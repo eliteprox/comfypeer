@@ -264,15 +264,28 @@ export async function mintUserSignerSession(externalUserId: string): Promise<Use
   }
   const signerUrl = resolveSignerUrl(signerFromExchange || null);
 
-  const pinned = process.env.NEXT_PUBLIC_ORCH_DISCOVERY_URL?.trim() || "";
+  // Prefer orch /discovery pin for studio (signer discover-orchestrators omits comfystream).
+  const pinned =
+    process.env.NEXT_PUBLIC_ORCH_DISCOVERY_URL?.trim() ||
+    process.env.ORCH_DISCOVERY_URL?.trim() ||
+    "";
   let discoveryUrl = "";
   if (pinned) {
-    discoveryUrl = absoluteHttpUrl(pinned, "NEXT_PUBLIC_ORCH_DISCOVERY_URL").toString();
+    discoveryUrl = absoluteHttpUrl(pinned, "ORCH_DISCOVERY_URL").toString();
   } else {
-    try {
-      discoveryUrl = discoveryUrlFromSignerSession(exchanged);
-    } catch {
-      discoveryUrl = discoverOrchestratorsUrlFromSigner(signerUrl);
+    const orch = process.env.ORCH_URL?.trim() || "";
+    if (orch) {
+      const u = absoluteHttpUrl(orch, "ORCH_URL");
+      u.pathname = "/discovery";
+      u.search = "";
+      u.hash = "";
+      discoveryUrl = u.toString();
+    } else {
+      try {
+        discoveryUrl = discoveryUrlFromSignerSession(exchanged);
+      } catch {
+        discoveryUrl = discoverOrchestratorsUrlFromSigner(signerUrl);
+      }
     }
   }
 
