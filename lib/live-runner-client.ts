@@ -15,6 +15,8 @@ export type PaymentHandle = {
   payment_params: string;
   manifest_id: string;
   state: Record<string, unknown> | null;
+  /** Time-metered runners use `live`; batch uses `fixed`; pixel video uses `lv2v`. */
+  payment_type?: string;
 };
 
 export type ReservedSession = {

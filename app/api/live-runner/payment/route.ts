@@ -63,6 +63,8 @@ export async function POST(request: NextRequest) {
       ...body.payment,
       // Normalize only — never replace a real exchange host with a guessed default.
       signer_url: resolveSignerUrl(body.payment.signer_url),
+      // Older browser handles may omit this; default to time-metered live.
+      payment_type: body.payment.payment_type?.trim() || "live",
     };
     const payment = await tickSessionPayment({
       accessToken: body.access_token,

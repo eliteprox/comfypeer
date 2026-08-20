@@ -20,6 +20,30 @@ export type PaymentHandle = {
   payment_params: string;
   manifest_id: string;
   state: Record<string, unknown> | null;
+  /**
+   * Remote-signer payment type. Must match discovery `price_info.unit`:
+   * seconds/hour → `live` (time-metered), fixed → `fixed`, 720p* → `lv2v`.
+   * Using `lv2v` for seconds-priced runners inflates ticket EV past signer max.
+   */
+  payment_type: string;
+};
+
+/** Matches livepeer-gateway `_RUNNER_PAYMENT_TYPES_BY_UNIT`. */
+const PAYMENT_TYPES_BY_UNIT: Record<string, string> = {
+  hour: "live",
+  seconds: "live",
+  "720p": "lv2v",
+  "720p-pixel-seconds": "lv2v",
+  fixed: "fixed",
+};
+
+/** ComfyStream is continuous metered stream → time-based `live`, never batch `fixed`/`lv2v`. */
+const DEFAULT_PAYMENT_TYPE = "live";
+
+type DiscoveryPriceInfo = {
+  price?: number;
+  currency?: string;
+  unit?: string;
 };
 
 type DiscoveryRunner = {
@@ -27,6 +51,7 @@ type DiscoveryRunner = {
   app: string;
   mode?: string;
   capacity_available?: number;
+  price_info?: DiscoveryPriceInfo;
 };
 
 type DiscoveryOrch = {
@@ -34,13 +59,48 @@ type DiscoveryOrch = {
   runners?: DiscoveryRunner[];
 };
 
+type RunnerCandidate = {
+  runnerUrl: string;
+  orchAddress: string;
+  paymentType: string;
+};
+
 type DiscoveryScan = {
   orchCount: number;
   runnerCount: number;
   matchingAppCount: number;
   capacityZeroCount: number;
-  candidates: { runnerUrl: string; orchAddress: string }[];
+  candidates: RunnerCandidate[];
 };
+
+export function paymentTypeFromPriceUnit(unit?: string | null): string {
+  const key = (unit || "").trim().toLowerCase();
+  if (!key) return DEFAULT_PAYMENT_TYPE;
+  return PAYMENT_TYPES_BY_UNIT[key] || DEFAULT_PAYMENT_TYPE;
+}
+
+function formatSignerErrorBody(data: unknown): string {
+  if (typeof data === "string") return data.slice(0, 500);
+  if (!data || typeof data !== "object") return "";
+  const obj = data as Record<string, unknown>;
+  const err = obj.error;
+  if (typeof err === "string") return err.slice(0, 500);
+  if (err && typeof err === "object") {
+    const nested = err as Record<string, unknown>;
+    if (typeof nested.message === "string" && nested.message.trim()) {
+      return nested.message.slice(0, 500);
+    }
+    return JSON.stringify(err).slice(0, 500);
+  }
+  if (typeof obj.message === "string" && obj.message.trim()) {
+    return obj.message.slice(0, 500);
+  }
+  try {
+    return JSON.stringify(obj).slice(0, 500);
+  } catch {
+    return "";
+  }
+}
 
 function originOf(url: string): string {
   const parsed = new URL(url);
@@ -198,10 +258,13 @@ async function generateLivePayment(
   handle: PaymentHandle,
   accessToken: string,
 ): Promise<{ payment: string; segCreds: string; state: Record<string, unknown> }> {
+  const paymentType =
+    (handle.payment_type || "").trim() || DEFAULT_PAYMENT_TYPE;
   const payload: Record<string, unknown> = {
     orchestrator: handle.payment_params,
-    type: "lv2v",
+    type: paymentType,
     ManifestID: handle.manifest_id,
+    app: APP_ID,
   };
   if (handle.state) payload.state = handle.state;
 
@@ -219,12 +282,7 @@ async function generateLivePayment(
     },
   );
   if (status >= 400) {
-    const detail =
-      typeof data === "string"
-        ? data.slice(0, 300)
-        : data && typeof data === "object" && "error" in data
-          ? JSON.stringify((data as { error?: unknown }).error).slice(0, 300)
-          : "";
+    const detail = formatSignerErrorBody(data);
     throw new Error(
       `generate-live-payment failed (${status}) at ${signerOrigin}${
         detail ? `: ${detail}` : ""
@@ -277,7 +335,11 @@ async function scanDiscovery(
         scan.capacityZeroCount += 1;
         continue;
       }
-      scan.candidates.push({ runnerUrl: runner.url, orchAddress: address });
+      scan.candidates.push({
+        runnerUrl: runner.url,
+        orchAddress: address,
+        paymentType: paymentTypeFromPriceUnit(runner.price_info?.unit),
+      });
     }
   }
   return scan;
@@ -299,7 +361,7 @@ function describeEmptyDiscovery(discoveryUrl: string, scan: DiscoveryScan): stri
 async function discoverComfyRunners(
   discoveryUrl: string,
   accessToken: string,
-): Promise<{ runnerUrl: string; orchAddress: string }[]> {
+): Promise<RunnerCandidate[]> {
   const tried = new Set<string>();
   const urls: string[] = [discoveryUrl];
 
@@ -355,13 +417,14 @@ export async function reserveComfySession(opts: {
   const payer = await signerAddress(signerUrl, accessToken);
   let lastError = "all runners failed";
 
-  for (const { runnerUrl } of runners) {
+  for (const candidate of runners) {
     try {
       const reserved = await reserveOneRunner({
-        runnerUrl,
+        runnerUrl: candidate.runnerUrl,
         signerUrl,
         accessToken,
         payer,
+        paymentType: candidate.paymentType,
       });
       return reserved;
     } catch (err) {
@@ -376,6 +439,7 @@ async function reserveOneRunner(opts: {
   signerUrl: string;
   accessToken: string;
   payer: string;
+  paymentType: string;
 }): Promise<ReservedLiveSession> {
   let challenge: {
     payment_params: string;
@@ -397,6 +461,7 @@ async function reserveOneRunner(opts: {
         orchestrator_url: paymentHandle.orchestrator_url,
         payment_params: paymentHandle.payment_params,
         manifest_id: paymentHandle.manifest_id,
+        payment_type: paymentHandle.payment_type,
         state: paid.state,
       };
       paymentHandle = nextHandle;
@@ -428,6 +493,7 @@ async function reserveOneRunner(opts: {
         orchestrator_url: orchestrator,
         payment_params,
         manifest_id,
+        payment_type: opts.paymentType || DEFAULT_PAYMENT_TYPE,
         state: paymentHandle?.state ?? null,
       };
       continue;
