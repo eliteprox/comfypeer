@@ -21,6 +21,11 @@ export function clearSignerSession(): void {
   }
 }
 
+function looksLikeJwt(token: string): boolean {
+  const parts = token.split(".");
+  return parts.length === 3 && parts.every((p) => p.length > 0);
+}
+
 export function readSignerSession(): BrowserSignerSession | null {
   try {
     const raw = sessionStorage.getItem(SIGNER_SESSION_STORAGE_KEY);
@@ -28,6 +33,11 @@ export function readSignerSession(): BrowserSignerSession | null {
     const parsed = JSON.parse(raw) as BrowserSignerSession;
     if (!parsed?.access_token || !parsed?.discovery_url) return null;
     if (!parsed.signer_url?.trim()) return null;
+    // Drop opaque pmth_*/app_* sessions — remote signer requires a JWT.
+    if (!looksLikeJwt(parsed.access_token)) {
+      sessionStorage.removeItem(SIGNER_SESSION_STORAGE_KEY);
+      return null;
+    }
     return parsed;
   } catch {
     return null;

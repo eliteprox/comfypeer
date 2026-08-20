@@ -216,13 +216,13 @@ export async function mintOwnerSignerSession(): Promise<OwnerSignerSession> {
 }
 
 /**
- * Mint a per-end-user opaque SignerSession (`pmth_*`) for browser studio jobs.
+ * Mint a per-end-user SignerSession JWT for browser studio → go-livepeer.
  *
- * Important: `@pymthouse/builder-sdk` `mintUserSignerSessionToken` sets
- * `resource = issuer` (signer-JWT path) and `tokenEndpointResponseToExchange`
- * drops `signer_url` / `discovery_url`. We exchange with **no** `resource`
- * (documented opaque gateway path) and parse the raw token JSON so the real
- * DMZ `signer_url` is preserved for generate-live-payment.
+ * Preview/remote signer identity webhook expects a JWT (`not a JWT` on opaque
+ * `pmth_*`). Exchange with `resource = issuer` selects the signer-JWT path.
+ * SDK `tokenEndpointResponseToExchange` drops `signer_url`; we parse raw JSON
+ * and fall back to `getSignerRouting().remoteDmzUrl` / env so the DMZ host
+ * still matches the mint issuer (never invent production).
  *
  * Discovery prefers env pin, then token `discovery_url`, then
  * `{signer_url}/discover-orchestrators`.
@@ -242,7 +242,18 @@ export async function mintUserSignerSession(externalUserId: string): Promise<Use
     });
   }
 
-  const exchanged = await exchangeUserJwtForOpaqueSignerSession(userJwt);
+  const config = readPymthouseM2mConfig();
+  if (!config) {
+    throw new PmtHouseError(
+      "Pymthouse is not configured. Set PYMTHOUSE_ISSUER_URL, PYMTHOUSE_M2M_CLIENT_ID, and PYMTHOUSE_M2M_CLIENT_SECRET.",
+      { status: 503, code: "pymthouse_required" },
+    );
+  }
+
+  const exchanged = await exchangeUserJwtForSignerSessionJwt(
+    userJwt,
+    config.issuerUrl,
+  );
   const accessToken =
     typeof exchanged.access_token === "string" ? exchanged.access_token.trim() : "";
   if (!accessToken) {
@@ -250,6 +261,12 @@ export async function mintUserSignerSession(externalUserId: string): Promise<Use
       status: 502,
       code: "invalid_token_response",
     });
+  }
+  if (!looksLikeJwt(accessToken)) {
+    throw new PmtHouseError(
+      "SignerSession mint returned a non-JWT access_token; remote signer requires a JWT",
+      { status: 502, code: "invalid_token_response" },
+    );
   }
 
   let signerFromExchange =
@@ -302,12 +319,19 @@ export async function mintUserSignerSession(externalUserId: string): Promise<Use
   };
 }
 
+function looksLikeJwt(token: string): boolean {
+  // Three base64url segments; opaque pmth_* / app_* keys fail this check.
+  const parts = token.split(".");
+  return parts.length === 3 && parts.every((p) => p.length > 0);
+}
+
 /**
- * RFC 8693 token exchange without `resource` → opaque `pmth_*` gateway session.
- * Parses raw JSON so `signer_url` / `discovery_url` survive (unlike the SDK mapper).
+ * RFC 8693 token exchange with `resource = issuer` → signer JWT for go-livepeer.
+ * Parses raw JSON so optional `signer_url` / `discovery_url` survive.
  */
-async function exchangeUserJwtForOpaqueSignerSession(
+async function exchangeUserJwtForSignerSessionJwt(
   userJwt: string,
+  issuerUrl: string,
 ): Promise<Record<string, unknown>> {
   const config = readPymthouseM2mConfig();
   if (!config) {
@@ -328,6 +352,7 @@ async function exchangeUserJwtForOpaqueSignerSession(
     });
   }
 
+  const resource = issuerUrl.replace(/\/+$/, "");
   const response = await fetch(tokenEndpoint, {
     method: "POST",
     headers: {
@@ -341,6 +366,7 @@ async function exchangeUserJwtForOpaqueSignerSession(
       subject_token_type: SUBJECT_ACCESS_TOKEN_TYPE,
       requested_token_type: REQUESTED_ACCESS_TOKEN_TYPE,
       scope: SIGN_JOB_SCOPE,
+      resource,
     }).toString(),
     cache: "no-store",
   });
