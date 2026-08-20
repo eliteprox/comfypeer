@@ -81,12 +81,11 @@ export async function POST(request: NextRequest) {
     });
     return withCors(request, NextResponse.json(reserved));
   } catch (err) {
+    const message = err instanceof Error ? err.message : "reserve_failed";
+    console.error("[live-runner/session] reserve failed:", message);
     return withCors(
       request,
-      NextResponse.json(
-        { error: err instanceof Error ? err.message : "reserve_failed" },
-        { status: 502 },
-      ),
+      NextResponse.json({ error: message }, { status: 502 }),
     );
   }
 }

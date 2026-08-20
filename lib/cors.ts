@@ -51,10 +51,17 @@ export function requestOrigin(request: NextRequest): string | null {
 }
 
 export function isAllowedBrowserMutation(request: NextRequest): boolean {
-  const allow = corsAllowlist();
-  if (allow.length === 0) return false;
   const origin = requestOrigin(request);
   if (!origin) return false;
+  // Same-origin studio POSTs are always allowed (avoids 403 when
+  // NEXT_PUBLIC_APP_URL lags the deployment host / custom domain).
+  try {
+    if (origin === new URL(request.url).origin) return true;
+  } catch {
+    /* ignore */
+  }
+  const allow = corsAllowlist();
+  if (allow.length === 0) return false;
   return allow.includes(origin);
 }
 

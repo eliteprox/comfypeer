@@ -88,15 +88,54 @@ function wsFromHttp(appUrl: string, path: string): string {
   return u.toString();
 }
 
+/** Undici often surfaces only "fetch failed"; unwrap cause + URL for BFF 502s. */
+export function formatUpstreamFetchError(
+  err: unknown,
+  method: string,
+  url: string,
+): Error {
+  const bits: string[] = [`${method} ${url}`];
+  if (err instanceof Error) {
+    bits.push(err.message);
+    const cause = (err as Error & { cause?: unknown }).cause;
+    if (cause instanceof Error) {
+      const code = (cause as NodeJS.ErrnoException).code;
+      bits.push(code ? `${cause.message} [${code}]` : cause.message);
+    } else if (cause != null && typeof cause === "object") {
+      const code =
+        "code" in cause && typeof (cause as { code?: unknown }).code === "string"
+          ? (cause as { code: string }).code
+          : "";
+      const msg =
+        "message" in cause &&
+        typeof (cause as { message?: unknown }).message === "string"
+          ? (cause as { message: string }).message
+          : String(cause);
+      bits.push(code ? `${msg} [${code}]` : msg);
+    } else if (cause != null) {
+      bits.push(String(cause));
+    }
+  } else {
+    bits.push(String(err));
+  }
+  return new Error(bits.join(" → "));
+}
+
 async function fetchJson(
   url: string,
   init: RequestInit & { timeoutMs?: number } = {},
 ): Promise<{ status: number; data: unknown; headers: Headers }> {
   const { timeoutMs = 15_000, ...rest } = init;
-  const res = await fetch(url, {
-    ...rest,
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  const method = (rest.method || "GET").toUpperCase();
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...rest,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    throw formatUpstreamFetchError(err, method, url);
+  }
   const text = await res.text();
   let data: unknown = null;
   if (text) {

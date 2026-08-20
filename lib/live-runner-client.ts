@@ -30,19 +30,36 @@ async function reserveSession(opts: {
   discoveryUrl: string;
   signerUrl: string;
 }): Promise<ReservedSession> {
-  const res = await fetch("/api/live-runner/session", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({
-      access_token: opts.accessToken,
-      discovery_url: opts.discoveryUrl,
-      signer_url: opts.signerUrl,
-    }),
-  });
+  let res: Response;
+  try {
+    res = await fetch("/api/live-runner/session", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        access_token: opts.accessToken,
+        discovery_url: opts.discoveryUrl,
+        signer_url: opts.signerUrl,
+      }),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "fetch failed";
+    throw new Error(
+      `Network error calling /api/live-runner/session (${msg}). Check Vercel Deployment Protection / SSO cookies and that the request is same-origin.`,
+    );
+  }
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error || `reserve failed (${res.status})`);
+    const body = (await res.json().catch(() => null)) as {
+      error?: string | { message?: string };
+    } | null;
+    const raw = body?.error;
+    const detail =
+      typeof raw === "string"
+        ? raw
+        : raw && typeof raw === "object" && typeof raw.message === "string"
+          ? raw.message
+          : "";
+    throw new Error(detail || `reserve failed (${res.status})`);
   }
   return (await res.json()) as ReservedSession;
 }
