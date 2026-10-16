@@ -17,7 +17,7 @@
     "@pymthouse/builder-sdk": "^0.6.4",
     "framer-motion": "^11.15.0",
     "lucide-react": "^1.6.0",
-    "next": "^15.1.0",
+    "next": "^15.5.27",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "server-only": "^0.0.1"
