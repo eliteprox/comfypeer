@@ -22,8 +22,32 @@ export const RESOLUTION_PRESETS = [
   { id: "landscape", label: "Landscape", width: 704, height: 384 },
 ] as const;
 
-/** Curated pipelines baked into the live-runner image — honesty over completeness. */
+/** Curated pipelines — first two are live against comfystream liverunner. */
 export const PIPELINES = [
+  {
+    id: "av-passthrough",
+    name: "Video/Audio Passthrough",
+    modalities: ["video in", "audio in", "video out", "audio out"] as const,
+    resolutions: ["512×512", "384×704", "704×384"] as const,
+    ttffMs: 400,
+    steadyFps: 30,
+    rateUsdPerSec: 0.001,
+    status: "available" as const,
+    nodes: ["LoadTensor", "SaveTensor", "LoadAudioTensor", "SaveAudioTensor"],
+    workflow: "av-passthrough-api.json" as const,
+  },
+  {
+    id: "invert-color-av",
+    name: "Inverted Color (audio passthrough)",
+    modalities: ["video in", "audio in", "video out", "audio out"] as const,
+    resolutions: ["512×512", "384×704", "704×384"] as const,
+    ttffMs: 500,
+    steadyFps: 30,
+    rateUsdPerSec: 0.001,
+    status: "available" as const,
+    nodes: ["LoadTensor", "InvertImage", "SaveTensor", "LoadAudioTensor", "SaveAudioTensor"],
+    workflow: "invert-color-av-passthrough-api.json" as const,
+  },
   {
     id: "streamdiffusion-img2img",
     name: "StreamDiffusion img2img",
@@ -32,19 +56,8 @@ export const PIPELINES = [
     ttffMs: 1800,
     steadyFps: 12,
     rateUsdPerSec: 0.0025,
-    status: "available" as const,
+    status: "coming" as const,
     nodes: ["LoadTensor", "StreamDiffusion", "SaveTensor"],
-  },
-  {
-    id: "krea-generative",
-    name: "Krea generative",
-    modalities: ["no input", "video out"] as const,
-    resolutions: ["512×512", "704×384"] as const,
-    ttffMs: 2400,
-    steadyFps: 8,
-    rateUsdPerSec: 0.0035,
-    status: "available" as const,
-    nodes: ["KreaSampler", "SaveTensor"],
   },
   {
     id: "depth-control",
@@ -54,19 +67,8 @@ export const PIPELINES = [
     ttffMs: 2200,
     steadyFps: 10,
     rateUsdPerSec: 0.003,
-    status: "available" as const,
+    status: "coming" as const,
     nodes: ["LoadTensor", "DepthAnything", "ControlNet", "SaveTensor"],
-  },
-  {
-    id: "analyze-vlm",
-    name: "VLM analyze",
-    modalities: ["video in", "text out"] as const,
-    resolutions: ["512×512"] as const,
-    ttffMs: 900,
-    steadyFps: 2,
-    rateUsdPerSec: 0.0015,
-    status: "available" as const,
-    nodes: ["LoadTensor", "VLMDescribe"],
   },
 ] as const;
 
