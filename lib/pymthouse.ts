@@ -10,6 +10,7 @@ import {
   type AppUserPaymentMethod,
 } from "@pymthouse/builder-sdk";
 import { appBaseUrl } from "@/lib/app-url";
+import { formatUserCode, normalizeUserCode } from "@/lib/device-login";
 
 function readPymthouseM2mConfig() {
   const issuerUrl = process.env.PYMTHOUSE_ISSUER_URL?.trim();
@@ -422,6 +423,92 @@ function m2mAuthHeader(): string {
 export function isUserNotFoundError(error: unknown): boolean {
   if (!(error instanceof PmtHouseError)) return false;
   return error.status === 404 || error.code === "user_not_found" || error.code === "not_found";
+}
+
+/**
+ * Bind a pending RFC 8628 device grant to this end user (RFC 8693).
+ * `resource=urn:pmth:device_code:<user_code>` is approved on the issuer;
+ * the browser never leaves ComfyPeer for the authorization server.
+ */
+export async function approveDeviceUserCode(
+  externalUserId: string,
+  userCode: string,
+): Promise<void> {
+  const normalized = normalizeUserCode(userCode);
+  if (!/^[A-Z0-9]{8}$/.test(normalized)) {
+    throw new PmtHouseError("Enter the 8-character code shown on your device", {
+      status: 400,
+      code: "invalid_user_code",
+    });
+  }
+
+  await ensureAppUserProvisioned(externalUserId);
+  const client = createPmtHouseClient();
+  const userToken = await client.mintUserAccessToken({
+    externalUserId,
+    scope: SIGN_JOB_SCOPE,
+  });
+  const userJwt = userToken.access_token?.trim() || "";
+  if (!userJwt) {
+    throw new PmtHouseError("User JWT mint returned no access_token", {
+      status: 502,
+      code: "invalid_token_response",
+    });
+  }
+
+  const config = readPymthouseM2mConfig();
+  if (!config) {
+    throw new PmtHouseError(
+      "Pymthouse is not configured. Set PYMTHOUSE_ISSUER_URL, PYMTHOUSE_M2M_CLIENT_ID, and PYMTHOUSE_M2M_CLIENT_SECRET.",
+      { status: 503, code: "pymthouse_required" },
+    );
+  }
+  const as = await loadAuthorizationServer(config.issuerUrl, fetch, {
+    allowInsecureHttp: config.allowInsecureHttp,
+  });
+  const tokenEndpoint = as.token_endpoint;
+  if (!tokenEndpoint) {
+    throw new PmtHouseError("OIDC discovery document is missing token_endpoint", {
+      status: 500,
+      code: "oidc_discovery_invalid",
+    });
+  }
+
+  const response = await fetch(tokenEndpoint, {
+    method: "POST",
+    headers: {
+      Authorization: m2mAuthHeader(),
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
+    },
+    body: new URLSearchParams({
+      grant_type: TOKEN_EXCHANGE_GRANT,
+      subject_token: userJwt,
+      subject_token_type: SUBJECT_ACCESS_TOKEN_TYPE,
+      resource: `urn:pmth:device_code:${formatUserCode(normalized)}`,
+    }).toString(),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new PmtHouseError(oauthErrorMessage(text) || "Device approval failed", {
+      status: response.status,
+      code: "device_approval_failed",
+    });
+  }
+}
+
+function oauthErrorMessage(text: string): string {
+  try {
+    const body = JSON.parse(text) as { error_description?: unknown; error?: unknown };
+    if (typeof body.error_description === "string" && body.error_description.trim()) {
+      return body.error_description.trim();
+    }
+    if (typeof body.error === "string" && body.error.trim()) return body.error.trim();
+  } catch {
+    /* plain text body */
+  }
+  return text.trim();
 }
 
 export async function ensureAppUserProvisioned(
