@@ -594,6 +594,56 @@ export async function loadUserCreditBalance(externalUserId: string): Promise<Use
   return (await response.json()) as UserCreditBalance;
 }
 
+export type UserUsageSummary = {
+  /** Prepaid credit, same figure as the studio balance. */
+  availableUsd: string;
+  pendingUsd: string;
+  requestCount: number;
+  periodStart: string | null;
+  periodEnd: string | null;
+};
+
+/** Studio balance plus the OpenMeter usage aggregate the desktop account reads. */
+export async function loadUserUsage(externalUserId: string): Promise<UserUsageSummary> {
+  const clientId = readPublicClientId();
+  const usageUrl = new URL(
+    `${appsOrigin()}/api/v1/apps/${encodeURIComponent(clientId)}/usage`,
+  );
+  usageUrl.searchParams.set("userId", externalUserId);
+  const [credits, usageResponse] = await Promise.all([
+    loadUserCreditBalance(externalUserId),
+    fetch(usageUrl.toString(), {
+      method: "GET",
+      headers: {
+        Authorization: m2mAuthHeader(),
+        Accept: "application/json",
+      },
+      cache: "no-store",
+    }),
+  ]);
+  if (!usageResponse.ok) {
+    const text = await usageResponse.text().catch(() => "");
+    throw new PmtHouseError(text || "Failed to load usage", {
+      status: usageResponse.status,
+      code: "usage_load_failed",
+    });
+  }
+  const usage = (await usageResponse.json()) as {
+    totals?: { requestCount?: unknown };
+    period?: { start?: unknown; end?: unknown };
+  };
+  const requestCount = Number(usage.totals?.requestCount);
+  const periodStart = usage.period?.start;
+  const periodEnd = usage.period?.end;
+  return {
+    availableUsd: credits.live,
+    pendingUsd: credits.pending,
+    requestCount: Number.isFinite(requestCount) ? requestCount : 0,
+    periodStart: typeof periodStart === "string" ? periodStart : null,
+    periodEnd: typeof periodEnd === "string" ? periodEnd : null,
+  };
+}
+
 export type WalletAutoTopUp = {
   enabled: boolean;
   amountUsd: string | null;
@@ -711,8 +761,8 @@ export async function startPaymentMethodCheckout(externalUserId: string) {
   const client = createPmtHouseClient();
   return client.createUserPaymentMethodCheckout({
     externalUserId,
-    successUrl: `${appBaseUrl()}/app/settings?topup=pm-saved`,
-    cancelUrl: `${appBaseUrl()}/app/settings?topup=canceled`,
+    successUrl: `${appBaseUrl()}/app/billing?topup=pm-saved`,
+    cancelUrl: `${appBaseUrl()}/app/billing?topup=canceled`,
   });
 }
 
@@ -739,8 +789,8 @@ export async function startWalletTopUp(externalUserId: string, amountUsd: number
       body: JSON.stringify({
         amountUsd: amountUsd.toFixed(2),
         externalUserId,
-        successUrl: `${appBaseUrl()}/app/settings?topup=succeeded`,
-        cancelUrl: `${appBaseUrl()}/app/settings?topup=canceled`,
+        successUrl: `${appBaseUrl()}/app/billing?topup=succeeded`,
+        cancelUrl: `${appBaseUrl()}/app/billing?topup=canceled`,
       }),
       cache: "no-store",
     },

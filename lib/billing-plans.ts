@@ -221,7 +221,7 @@ export function settingsCheckoutUrls(planId?: string): {
     ? `&changePlan=${encodeURIComponent(planId)}`
     : "";
   return {
-    successUrl: `${origin}/app/settings?checkout=success${change}`,
-    cancelUrl: `${origin}/app/settings?checkout=cancel`,
+    successUrl: `${origin}/app/billing?checkout=success${change}`,
+    cancelUrl: `${origin}/app/billing?checkout=cancel`,
   };
 }
