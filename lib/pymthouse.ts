@@ -711,8 +711,8 @@ export async function startPaymentMethodCheckout(externalUserId: string) {
   const client = createPmtHouseClient();
   return client.createUserPaymentMethodCheckout({
     externalUserId,
-    successUrl: `${appBaseUrl()}/app/settings?topup=pm-saved`,
-    cancelUrl: `${appBaseUrl()}/app/settings?topup=canceled`,
+    successUrl: `${appBaseUrl()}/app/billing?topup=pm-saved`,
+    cancelUrl: `${appBaseUrl()}/app/billing?topup=canceled`,
   });
 }
 
@@ -739,8 +739,8 @@ export async function startWalletTopUp(externalUserId: string, amountUsd: number
       body: JSON.stringify({
         amountUsd: amountUsd.toFixed(2),
         externalUserId,
-        successUrl: `${appBaseUrl()}/app/settings?topup=succeeded`,
-        cancelUrl: `${appBaseUrl()}/app/settings?topup=canceled`,
+        successUrl: `${appBaseUrl()}/app/billing?topup=succeeded`,
+        cancelUrl: `${appBaseUrl()}/app/billing?topup=canceled`,
       }),
       cache: "no-store",
     },
