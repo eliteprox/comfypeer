@@ -594,6 +594,56 @@ export async function loadUserCreditBalance(externalUserId: string): Promise<Use
   return (await response.json()) as UserCreditBalance;
 }
 
+export type UserUsageSummary = {
+  /** Prepaid credit, same figure as the studio balance. */
+  availableUsd: string;
+  pendingUsd: string;
+  requestCount: number;
+  periodStart: string | null;
+  periodEnd: string | null;
+};
+
+/** Studio balance plus the OpenMeter usage aggregate the desktop account reads. */
+export async function loadUserUsage(externalUserId: string): Promise<UserUsageSummary> {
+  const clientId = readPublicClientId();
+  const usageUrl = new URL(
+    `${appsOrigin()}/api/v1/apps/${encodeURIComponent(clientId)}/usage`,
+  );
+  usageUrl.searchParams.set("userId", externalUserId);
+  const [credits, usageResponse] = await Promise.all([
+    loadUserCreditBalance(externalUserId),
+    fetch(usageUrl.toString(), {
+      method: "GET",
+      headers: {
+        Authorization: m2mAuthHeader(),
+        Accept: "application/json",
+      },
+      cache: "no-store",
+    }),
+  ]);
+  if (!usageResponse.ok) {
+    const text = await usageResponse.text().catch(() => "");
+    throw new PmtHouseError(text || "Failed to load usage", {
+      status: usageResponse.status,
+      code: "usage_load_failed",
+    });
+  }
+  const usage = (await usageResponse.json()) as {
+    totals?: { requestCount?: unknown };
+    period?: { start?: unknown; end?: unknown };
+  };
+  const requestCount = Number(usage.totals?.requestCount);
+  const periodStart = usage.period?.start;
+  const periodEnd = usage.period?.end;
+  return {
+    availableUsd: credits.live,
+    pendingUsd: credits.pending,
+    requestCount: Number.isFinite(requestCount) ? requestCount : 0,
+    periodStart: typeof periodStart === "string" ? periodStart : null,
+    periodEnd: typeof periodEnd === "string" ? periodEnd : null,
+  };
+}
+
 export type WalletAutoTopUp = {
   enabled: boolean;
   amountUsd: string | null;

@@ -5,6 +5,7 @@ import { useEffect, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
+  ChartColumn,
   CircleDollarSign,
   KeyRound,
   LayoutGrid,
@@ -30,6 +31,12 @@ const NAV: { href: string; label: string; icon: LucideIcon; active: (path: strin
       label: "Billing",
       icon: CircleDollarSign,
       active: (path) => path.startsWith("/app/billing"),
+    },
+    {
+      href: "/app/usage",
+      label: "Usage",
+      icon: ChartColumn,
+      active: (path) => path.startsWith("/app/usage"),
     },
     {
       href: "/app/keys",
