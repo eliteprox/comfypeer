@@ -1,34 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth0 } from "@/lib/auth0";
+import { isBrowserMutation } from "@/lib/browser-mutation";
 import { isValidEmail } from "@/lib/email";
 import { externalUserIdFromEmail } from "@/lib/external-user-id";
 import { ensureAppUserProvisioned, PmtHouseError } from "@/lib/pymthouse";
 import { sessionSecretConfigured, setSessionCookie } from "@/lib/session";
 
 export const runtime = "nodejs";
-
-function isBrowserMutation(request: NextRequest): boolean {
-  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (!configured) return false;
-  let expectedOrigin: string;
-  try {
-    expectedOrigin = new URL(configured).origin;
-  } catch {
-    return false;
-  }
-  const origin = request.headers.get("origin");
-  if (origin) return origin === expectedOrigin;
-  const referer = request.headers.get("referer");
-  if (referer) {
-    try {
-      return new URL(referer).origin === expectedOrigin;
-    } catch {
-      return false;
-    }
-  }
-  // Browser POSTs send Origin; reject opaque cross-site callers.
-  return false;
-}
 
 export async function POST(request: NextRequest) {
   if (!sessionSecretConfigured()) {

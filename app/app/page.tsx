@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { LogoMark } from "@/components/Logo";
 import { Button } from "@/components/Button";
-import { LiveDemoWidget } from "@/components/LiveDemoWidget";
+import { StreamStudio } from "@/components/StreamStudio";
 import { useAuth } from "@/components/AuthProvider";
 import { MissingEmailNotice } from "@/components/MissingEmailNotice";
 import { PIPELINES, RESOLUTION_PRESETS, formatUsd } from "@/lib/constants";
@@ -138,8 +138,9 @@ export default function StudioPage() {
                 className="mt-1 block rounded-md border border-border bg-elevated px-2 py-1.5 text-sm text-fg outline-none focus-visible:ring-1 focus-visible:ring-live/30"
               >
                 {PIPELINES.map((p) => (
-                  <option key={p.id} value={p.id}>
+                  <option key={p.id} value={p.id} disabled={p.status !== "available"}>
                     {p.name}
+                    {p.status !== "available" ? " (soon)" : ""}
                   </option>
                 ))}
               </select>
@@ -160,11 +161,12 @@ export default function StudioPage() {
             </label>
           </div>
 
-          <LiveDemoWidget />
+          <StreamStudio pipelineId={pipelineId} resId={resId} />
 
           <p className="text-xs text-faint">
-            First run tip: start the stream above. Idle disconnect fires around 60s without frames.
-            Workflow errors show a passthrough overlay and stop billable accrual while degraded.
+            Authenticated jobs use a SignerSession JWT in sessionStorage, reserve{" "}
+            <span className="font-mono">comfystream</span> on the orchestrator, and stream JPEG
+            frames over the orch-proxied <span className="font-mono">/ws_stream</span> WebSocket.
           </p>
         </div>
       </div>
