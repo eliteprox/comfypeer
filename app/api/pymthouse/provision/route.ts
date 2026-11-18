@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid request origin" }, { status: 403 });
   }
   try {
-    const session = await auth0.getSession();
+    const session = await auth0.getSession(request);
     const email = session?.user?.email?.trim().toLowerCase() || "";
     if (!isValidEmail(email)) {
       return NextResponse.json({ error: "Sign in required" }, { status: 401 });
