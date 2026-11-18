@@ -11,6 +11,7 @@ import {
   LayoutGrid,
   LogOut,
   Settings,
+  UserRound,
   type LucideIcon,
 } from "lucide-react";
 import { LogoMark } from "@/components/Logo";
@@ -19,10 +20,16 @@ import { MissingEmailNotice } from "@/components/MissingEmailNotice";
 
 const NAV: { href: string; label: string; icon: LucideIcon; active: (path: string) => boolean }[] =
   [
-    { href: "/app", label: "Stream", icon: Activity, active: (path) => path === "/app" },
+    { href: "/app", label: "Account", icon: UserRound, active: (path) => path === "/app" },
+    {
+      href: "/app/studio",
+      label: "Stream",
+      icon: Activity,
+      active: (path) => path.startsWith("/app/studio"),
+    },
     {
       href: "/pipelines",
-      label: "Pipelines",
+      label: "Models",
       icon: LayoutGrid,
       active: (path) => path.startsWith("/pipelines"),
     },
@@ -78,7 +85,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <aside className="hidden w-56 shrink-0 flex-col border-r border-border bg-surface md:flex">
         <div className="flex h-12 items-center gap-2 border-b border-border px-3">
           <LogoMark size={22} />
-          <span className="text-sm font-semibold">Studio</span>
+          <span className="text-sm font-semibold">ComfyPeer</span>
         </div>
         <nav className="flex flex-1 flex-col gap-1 p-2 text-sm">
           {NAV.map((item) => (

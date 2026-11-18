@@ -1,32 +1,30 @@
-# Page override: `/app` (Stream studio shell)
+# Page override: `/app` (Account) and `/app/studio` (Web studio)
 
-## Job
+## `/app` — account overview
 
-Operate a live ComfyStream session: preview, prompt, params, billing awareness.
+Derived from the account, wallet, and usage APIs. No new database.
 
-## Layout
+- Connection card: how to sign in on the ComfyUI Desktop canvas. It does not pretend to detect a live connection.
+- Balance: included usage, then prepaid, when the wallet payload already exposes them. Missing numbers stay missing.
+- Auto top-up status, with Turn on linking to `/app/billing`. Do not duplicate BillingPanel.
+- Checklist from `accountChecklist`: Account created, Credit available, First stream, Auto top-up. Install and Desktop sign-in are not checkboxes. A first stream collapses the list to "All set" plus a usage link.
+- Starter workflow download for Stream Video File - noop.
+- Recent activity links to `/app/usage`. Show a request count only when it is greater than zero.
+- Credit runway only when spendable balance and a measured Desktop rate both exist. There is no measured Desktop rate yet, so the sentence is omitted.
 
-```
-┌──────── sidebar (pipelines, runs) ──┬──────── main ─────────────────────────┐
-│                                     │  input preview │ output preview        │
-│                                     │  prompt + update_params                │
-│                                     │  resolution presets · FPS · cost tick  │
-│                                     ├────────────────────────────────────────┤
-│                                     │  billing banner (if not active)       │
-└─────────────────────────────────────┴────────────────────────────────────────┘
-```
+Signup and login `returnTo` defaults to `/app` (this overview), and must not replace a device-flow return path.
 
-Data-dense: `--space-sm`/`md`, 12–14px UI text. Swiss grid; no marketing hero spacing.
+## `/app/studio` — web studio
 
-## Critical UX policies (product + UI)
+`StreamStudio` stays here. One line on the page: the same account is what ComfyUI Desktop uses.
+
+Shell nav: Account (`/app`), Stream (`/app/studio`), Models (`/pipelines`), Billing, Usage, API keys, Settings.
+
+Data-dense: `--space-sm`/`md`, 12–14px UI text. Resolution remains the three presets.
 
 | Event | UI |
 |-------|-----|
-| `at_risk` | Billing-warn banner + one-click top-up **without** dropping stream |
-| `blocked` | Policy choice: hard-cut vs grace — must be explicit in UI copy |
-| Workflow error mid-stream | Passthrough + visible overlay; **stop billable accrual** while degraded |
-| No frames ~60s | Idle disconnect warning → disconnect (if metering is wall-clock) |
+| No spendable credit | Existing top-up banner |
+| `at_risk` / `blocked` | Billing panel states, warm colors only there |
 
-## Components in scope
-
-Node-graph (optional advanced tab), run rows, balance meter, key settings elsewhere under `/app/settings`.
+Do not invent a connected-desktop check or a runway from a web-studio rate.

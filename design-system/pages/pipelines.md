@@ -1,20 +1,22 @@
-# Page override: `/pipelines`
+# Page override: `/pipelines` (Remote models)
+
+Route stays `/pipelines`. Title is Remote models.
 
 ## Job
 
-Trust via **provable currency**: curated list from `configs/nodes.yaml` + pipeline catalog + resolution presets.
+List the remote models the nodes can call, keyed by `model_id` (`REMOTE_MODELS`), not by web-studio pipeline ids.
 
-## Structure
+Intro: Remote models the nodes can call. Set model_id on TrickleConfig, or wire model_id_out from a pipeline config node.
 
-- Filterable grid: pipeline / node pack / checkpoint / resolution support
-- Each card: name, modalities (video/audio), resolutions (presets), latency band if known
-- Empty/unsupported state: "Not in image — request or wait for changelog"
+## Cards
 
-## Honesty rules
+- Model id in mono, with a copy button (aria-live "Copied")
+- Status
+- Rate and TTFF only when measured. Otherwise "not yet measured".
+- Link to a starter workflow
 
-- Never imply user LoRAs or arbitrary custom nodes work
-- Linking changelog on every image-add is part of this page's chrome
+Do not add modality filters unless `REMOTE_MODELS` has fields those filters match.
 
-## Visual
+## Web studio
 
-Data-dense catalog (app-like), still dark marketing chrome. Cool structure for tags; live accent only for "available / warm" if you show availability — warm never.
+A collapsed section, "Web studio pipelines", renders `PIPELINES` and labels them as the browser studio. Coming pipelines say "not yet measured" rather than borrowing placeholder numbers.

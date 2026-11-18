@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { track } from "@/lib/events";
 import { PmtHouseError, startWalletTopUp } from "@/lib/pymthouse";
 import { parseTopUpAmountUsd } from "@/lib/top-up-amount";
 
@@ -18,6 +19,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
     const result = await startWalletTopUp(body.externalUserId.trim(), parsed.amount);
+    track("topup_started", { amount_usd: parsed.amount });
     return NextResponse.json({
       url: result.checkoutUrl || result.url || null,
     });

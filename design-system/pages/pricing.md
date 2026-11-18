@@ -2,24 +2,29 @@
 
 ## Job
 
-Honest unit economics: **$/second of stream**, not GPU-hour comparisons only.
+One balance, billed by the second, shared by ComfyUI Desktop and the web studio.
 
 ## Structure
 
-1. Plan ladder: Free (human-verified) → Pay-as-you-go → Pro  
-   Studio row: **disabled / "coming"** until workspace primitive exists — do not fake seats.
-2. Interactive **cost calculator**: resolution preset × pipeline × minutes → estimate
-3. Idle / pause policy callout (verify `billable_secs` when frames stop — state the rule plainly)
-4. FAQ: network cost vs margin (only if Decision #2 = show); lock-in; bounded workflows
+1. Plan ladder.
+   - Free: Create account. The card does not promise credit. One sentence may say free credit for verified GitHub accounts is not available yet.
+   - Pay as you go: prepaid.
+   - Pro: Coming soon, and the control is disabled so it does not navigate to `/signup`.
+   - Studio: disabled until a workspace primitive exists.
+2. How the balance works: starter credit when granted, prepaid, optional auto top-up, link to `/app/billing`. Do not rewrite API `explain` copy.
+3. Worked example only from an existing measured `PIPELINES` rate, labelled as that web-studio pipeline.
+4. Estimate control uses available web-studio pipelines only.
+
+## Do not
+
+- Do not claim that stopping a workflow stops billing.
+- Do not publish a Desktop model rate that has not been measured.
+- Do not put "$5 included" or "Human-verified" on the free card.
 
 ## Typography
 
-All prices, rates, and calculator outputs in JetBrains Mono tabular. Display USD to 3 decimals.
+Prices, rates, and estimates stay in JetBrains Mono tabular. Display USD to 3 decimals.
 
 ## Color
 
-Plan CTAs use `--color-live`. Do not use billing-warn on pricing cards. Soft-negative / at-risk language only in FAQ if explaining gates.
-
-## Free tier
-
-Write Free copy **after** #409 lands. Until then: placeholder "Human-verified · $5 included · no overage" without agent entitlement language.
+Plan CTAs use `--color-live`. Do not use billing-warn on pricing cards.

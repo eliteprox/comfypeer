@@ -511,19 +511,30 @@ function oauthErrorMessage(text: string): string {
   return text.trim();
 }
 
+const FIRST_PROVISION_WINDOW_MS = 2 * 60 * 1000;
+
+/**
+ * Upsert the app user. `created` is true only when the record's createdAt is
+ * inside a short window, so a later session refresh is not a new account.
+ * A 409 means the user already exists.
+ */
 export async function ensureAppUserProvisioned(
   externalUserId: string,
   email?: string,
-): Promise<void> {
+): Promise<{ created: boolean }> {
   const client = createPmtHouseClient();
   try {
-    await client.upsertAppUser({
+    const record = await client.upsertAppUser({
       externalUserId,
       ...(email?.trim() ? { email: email.trim() } : {}),
       status: "active",
     });
+    const createdAt = Date.parse(record.createdAt);
+    const created =
+      Number.isFinite(createdAt) && Math.abs(Date.now() - createdAt) <= FIRST_PROVISION_WINDOW_MS;
+    return { created };
   } catch (error) {
-    if (error instanceof PmtHouseError && error.status === 409) return;
+    if (error instanceof PmtHouseError && error.status === 409) return { created: false };
     throw error;
   }
 }

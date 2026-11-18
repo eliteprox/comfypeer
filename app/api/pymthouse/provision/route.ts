@@ -3,6 +3,7 @@ import { auth0 } from "@/lib/auth0";
 import { isBrowserMutation } from "@/lib/browser-mutation";
 import { isValidEmail } from "@/lib/email";
 import { externalUserIdFromEmail } from "@/lib/external-user-id";
+import { track } from "@/lib/events";
 import { ensureAppUserProvisioned, PmtHouseError } from "@/lib/pymthouse";
 import { sessionSecretConfigured, setSessionCookie } from "@/lib/session";
 
@@ -22,7 +23,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Sign in required" }, { status: 401 });
     }
     const externalUserId = externalUserIdFromEmail(email);
-    await ensureAppUserProvisioned(externalUserId, email);
+    const provisioned = await ensureAppUserProvisioned(externalUserId, email);
+    if (provisioned.created) track("account_provisioned", {});
     const response = NextResponse.json({ ok: true, externalUserId, email });
     const cookie = setSessionCookie(response, externalUserId, email);
     if (!cookie.ok) {

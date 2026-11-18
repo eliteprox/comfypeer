@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { track } from "@/lib/events";
 import {
   listUserPaymentMethods,
   loadMerchantWallet,
@@ -85,6 +86,9 @@ export async function PATCH(request: NextRequest) {
       enabled: body.enabled,
       amountUsd,
     });
+    if (body.enabled) {
+      track("auto_topup_enabled", { amount_usd: Number(amountUsd) });
+    }
     return NextResponse.json({ autoTopUp });
   } catch (error) {
     return pmtHouseErrorResponse(error, "Failed to save auto top-up");

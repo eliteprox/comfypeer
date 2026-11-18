@@ -1,12 +1,97 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Check } from "lucide-react";
 import { Wordmark } from "@/components/Logo";
 import { Button } from "@/components/Button";
+import { WorkflowDownload } from "@/components/WorkflowDownload";
 import { useAuth } from "@/components/AuthProvider";
 import { MissingEmailNotice } from "@/components/MissingEmailNotice";
+import { FIRST_RUN_WORKFLOW_ID, formatUsd, starterWorkflowById } from "@/lib/constants";
+import { installHref } from "@/lib/install-request";
 import type { DeviceLoginState } from "@/lib/device-login";
+
+function ApprovalSuccess({ email, userId }: { email?: string; userId?: string }) {
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const [spendable, setSpendable] = useState<number | null>(null);
+  const firstRun = starterWorkflowById(FIRST_RUN_WORKFLOW_ID);
+
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    void fetch(`/api/pymthouse/account?externalUserId=${encodeURIComponent(userId)}`)
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return response.json() as Promise<{ spendableUsd?: string }>;
+      })
+      .then((data) => {
+        if (cancelled || !data || data.spendableUsd == null) return;
+        const amount = Number(data.spendableUsd);
+        if (Number.isFinite(amount)) setSpendable(amount);
+      })
+      .catch(() => null);
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  return (
+    <>
+      <h1
+        ref={headingRef}
+        tabIndex={-1}
+        role="status"
+        className="flex items-center gap-2 text-2xl font-semibold text-fg outline-none"
+      >
+        <Check className="h-6 w-6 text-live" strokeWidth={1.5} aria-hidden />
+        ComfyUI is connected
+      </h1>
+      {email ? (
+        <p className="mt-4 text-sm text-muted">
+          Signed in as <span className="text-fg">{email}</span>
+        </p>
+      ) : null}
+      {spendable != null ? (
+        <p className="mt-2 text-sm text-muted">
+          Balance <span className="font-mono tabular-nums text-live">{formatUsd(spendable)}</span>
+        </p>
+      ) : null}
+      <ol className="mt-6 list-decimal space-y-2 pl-5 text-sm text-muted">
+        <li>Return to ComfyUI.</li>
+        <li>
+          {firstRun ? (
+            <WorkflowDownload id={firstRun.id}>
+              Download the first-run starter workflow ({firstRun.title})
+            </WorkflowDownload>
+          ) : (
+            "Download the first-run starter workflow."
+          )}
+        </li>
+        <li>
+          <Link href="/app/billing" className="text-cool hover:underline">
+            Add a payment method
+          </Link>
+        </li>
+      </ol>
+      <p className="mt-4 text-sm">
+        <a
+          href={installHref("approval")}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-cool hover:underline"
+        >
+          Install in ComfyUI
+        </a>
+      </p>
+      <p className="mt-6 text-sm text-muted">You can close this tab.</p>
+    </>
+  );
+}
 
 export function LoginForm({ device }: { device: DeviceLoginState }) {
   const { user, ready, missingEmail } = useAuth();
@@ -61,10 +146,12 @@ export function LoginForm({ device }: { device: DeviceLoginState }) {
             <p className="mt-2 text-sm text-muted" role="alert">
               This device link is not valid. Start sign-in again from ComfyUI.
             </p>
-            <Button href="/auth/login?returnTo=/app" className="mt-8 w-full">
-              Continue with Auth0
+            <Button href="/auth/login?returnTo=/app" className="mt-8 min-h-11 w-full">
+              Log in
             </Button>
           </>
+        ) : deviceReady && approved ? (
+          <ApprovalSuccess email={user?.email} userId={user?.id} />
         ) : deviceReady ? (
           <>
             <h1 className="text-2xl font-semibold text-fg">Approve device sign-in</h1>
@@ -74,11 +161,7 @@ export function LoginForm({ device }: { device: DeviceLoginState }) {
             <p className="mt-6 text-center font-mono text-3xl tracking-[0.3em] text-fg">
               {deviceReady.displayCode}
             </p>
-            {approved ? (
-              <p className="mt-6 text-sm text-muted" role="status">
-                This device is signed in. You can close this window and return to ComfyUI.
-              </p>
-            ) : user ? (
+            {user ? (
               <>
                 <p className="mt-4 text-sm text-muted">
                   Signed in as <span className="text-fg">{user.email}</span>
@@ -88,22 +171,28 @@ export function LoginForm({ device }: { device: DeviceLoginState }) {
                     {error}
                   </p>
                 ) : null}
-                <Button className="mt-6 w-full" disabled={approving || !ready} onClick={() => void approve()}>
+                <Button
+                  className="mt-6 min-h-11 w-full"
+                  disabled={approving || !ready}
+                  onClick={() => void approve()}
+                >
                   {approving ? "Approving…" : "Approve and connect"}
                 </Button>
               </>
             ) : (
-              <Button href={authHref} className="mt-8 w-full" disabled={!ready}>
-                {ready ? "Continue to approve" : "Checking session…"}
+              <Button href={authHref} className="mt-8 min-h-11 w-full" disabled={!ready}>
+                {ready ? "Continue" : "Checking session…"}
               </Button>
             )}
           </>
         ) : (
           <>
-            <h1 className="text-2xl font-semibold text-fg">Log in</h1>
-            <p className="mt-2 text-sm text-muted">Sign in with Auth0 to open the studio.</p>
-            <Button href={authHref} className="mt-8 w-full">
-              Continue with Auth0
+            <h1 className="text-2xl font-semibold text-fg">Log in to your ComfyPeer account</h1>
+            <p className="mt-2 text-sm text-muted">
+              The same account signs in to Livepeer AI Streaming on the canvas.
+            </p>
+            <Button href={authHref} className="mt-8 min-h-11 w-full">
+              Log in
             </Button>
           </>
         )}

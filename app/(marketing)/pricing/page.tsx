@@ -1,29 +1,35 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/Button";
-import { PIPELINES, PLANS, RESOLUTION_PRESETS, formatUsd } from "@/lib/constants";
+import { PIPELINES, PLANS, formatUsd } from "@/lib/constants";
 
 export default function PricingPage() {
-  const [pipelineId, setPipelineId] = useState<string>(PIPELINES[0]!.id);
-  const [resId, setResId] = useState<string>(RESOLUTION_PRESETS[0]!.id);
+  const available = PIPELINES.filter((pipeline) => pipeline.status === "available");
+  const [pipelineId, setPipelineId] = useState<string>(available[0]?.id ?? "");
   const [minutes, setMinutes] = useState(5);
 
-  const pipeline = PIPELINES.find((p) => p.id === pipelineId) ?? PIPELINES[0]!;
-  const estimate = useMemo(() => pipeline.rateUsdPerSec * minutes * 60, [pipeline, minutes]);
+  const pipeline = available.find((item) => item.id === pipelineId) ?? available[0];
+  const estimate = useMemo(() => {
+    if (!pipeline) return null;
+    return pipeline.rateUsdPerSec * minutes * 60;
+  }, [pipeline, minutes]);
+  const minuteExample = pipeline ? pipeline.rateUsdPerSec * 60 : null;
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
       <h1 className="text-2xl font-semibold tracking-tight text-fg">Pricing</h1>
       <p className="mt-2 max-w-2xl text-muted">
-        Honest unit economics: dollars per second of stream time — not GPU-hour marketing math.
+        Dollars per second of stream time. The same balance is used by ComfyUI Desktop and the web
+        studio.
       </p>
 
       <div className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {PLANS.map((plan) => (
           <div
             key={plan.id}
-            id={plan.id === "studio" ? "studio" : undefined}
+            id={plan.id}
             className={`rounded-lg border p-5 ${
               plan.featured ? "border-live/40 bg-live-dim/20" : "border-border bg-surface"
             } ${plan.disabled ? "opacity-60" : ""}`}
@@ -35,7 +41,7 @@ export default function PricingPage() {
               href={plan.disabled ? undefined : plan.href}
               disabled={plan.disabled}
               variant={plan.featured ? "primary" : "secondary"}
-              className="mt-5 w-full"
+              className="mt-5 min-h-11 w-full"
             >
               {plan.cta}
             </Button>
@@ -43,73 +49,77 @@ export default function PricingPage() {
         ))}
       </div>
 
-      <section className="mt-14 rounded-lg border border-border bg-surface p-6">
-        <h2 className="text-lg font-semibold text-fg">Cost calculator</h2>
-        <p className="mt-1 text-sm text-muted">
-          Estimate from retail rate × duration. Resolution presets only.
-        </p>
-        <div className="mt-6 grid gap-4 sm:grid-cols-3">
-          <label className="block text-sm">
-            <span className="text-muted">Pipeline</span>
-            <select
-              value={pipelineId}
-              onChange={(e) => setPipelineId(e.target.value)}
-              className="mt-1 w-full rounded-md border border-border bg-elevated px-3 py-2 text-fg outline-none focus-visible:ring-1 focus-visible:ring-live/30"
-            >
-              {PIPELINES.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-sm">
-            <span className="text-muted">Resolution</span>
-            <select
-              value={resId}
-              onChange={(e) => setResId(e.target.value)}
-              className="mt-1 w-full rounded-md border border-border bg-elevated px-3 py-2 text-fg outline-none focus-visible:ring-1 focus-visible:ring-live/30"
-            >
-              {RESOLUTION_PRESETS.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.label} {r.width}×{r.height}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-sm">
-            <span className="text-muted">Minutes</span>
-            <input
-              type="number"
-              min={1}
-              max={180}
-              value={minutes}
-              onChange={(e) => setMinutes(Math.max(1, Number(e.target.value) || 1))}
-              className="mt-1 w-full rounded-md border border-border bg-elevated px-3 py-2 font-mono tabular-nums text-fg outline-none focus-visible:ring-1 focus-visible:ring-live/30"
-            />
-          </label>
-        </div>
-        <p className="mt-6 font-mono text-2xl tabular-nums text-live">
-          {formatUsd(estimate)}{" "}
-          <span className="text-sm text-muted">
-            @ {formatUsd(pipeline.rateUsdPerSec)}/s · {minutes} min
-          </span>
+      <p className="mt-6 max-w-2xl text-sm text-muted">
+        Free credit for verified GitHub accounts is not available yet.
+      </p>
+
+      <section className="mt-14 max-w-2xl">
+        <h2 className="text-lg font-semibold text-fg">How the balance works</h2>
+        <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-muted">
+          <li>Starter credit, when it is granted.</li>
+          <li>Prepaid balance you add.</li>
+          <li>Optional auto top-up.</li>
+        </ol>
+        <p className="mt-3 text-sm">
+          <Link href="/app/billing" className="text-cool hover:underline">
+            Billing
+          </Link>
         </p>
       </section>
 
-      <section className="mt-10 max-w-2xl">
-        <h2 className="text-base font-semibold text-fg">Idle / pause policy</h2>
-        <p className="mt-2 text-sm text-muted">
-          Workers are capacity-1. If frames stop for ~60s we disconnect and stop accruing
-          billable seconds. Pausing the demo ticker locally does not pause a live worker — stop
-          the stream in studio when you step away.
-        </p>
-        <h2 className="mt-6 text-base font-semibold text-fg">Free tier</h2>
-        <p className="mt-2 text-sm text-muted">
-          Human-verified · $5 included · no overage. Agents must prepay — they do not receive
-          the human starter credit.
-        </p>
-      </section>
+      {pipeline && minuteExample != null ? (
+        <section className="mt-10 max-w-2xl">
+          <h2 className="text-lg font-semibold text-fg">Worked example</h2>
+          <p className="mt-2 text-sm text-muted">
+            {pipeline.name} on the web studio is {formatUsd(pipeline.rateUsdPerSec)}/s. Sixty
+            seconds is {formatUsd(minuteExample)}. That figure is this pipeline&apos;s web-studio
+            rate, not a Desktop model rate.
+          </p>
+        </section>
+      ) : null}
+
+      {pipeline && estimate != null ? (
+        <section className="mt-10 rounded-lg border border-border bg-surface p-6">
+          <h2 className="text-lg font-semibold text-fg">Web studio estimate</h2>
+          <p className="mt-1 text-sm text-muted">
+            Computed from the measured web-studio rate for the pipeline you pick. Desktop model
+            rates are not yet measured, so they are not in this estimate.
+          </p>
+          <div className="mt-6 grid gap-4 sm:grid-cols-2">
+            <label className="block text-sm">
+              <span className="text-muted">Web studio pipeline</span>
+              <select
+                value={pipeline.id}
+                onChange={(event) => setPipelineId(event.target.value)}
+                className="mt-1 min-h-11 w-full rounded-md border border-border bg-elevated px-3 py-2 text-fg outline-none focus-visible:ring-1 focus-visible:ring-live/30"
+              >
+                {available.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-sm">
+              <span className="text-muted">Minutes</span>
+              <input
+                type="number"
+                min={1}
+                max={180}
+                value={minutes}
+                onChange={(event) => setMinutes(Math.max(1, Number(event.target.value) || 1))}
+                className="mt-1 min-h-11 w-full rounded-md border border-border bg-elevated px-3 py-2 font-mono tabular-nums text-fg outline-none focus-visible:ring-1 focus-visible:ring-live/30"
+              />
+            </label>
+          </div>
+          <p className="mt-6 font-mono text-2xl tabular-nums text-live">
+            {formatUsd(estimate)}{" "}
+            <span className="text-sm text-muted">
+              @ {formatUsd(pipeline.rateUsdPerSec)}/s · {minutes} min · {pipeline.name}
+            </span>
+          </p>
+        </section>
+      ) : null}
     </div>
   );
 }

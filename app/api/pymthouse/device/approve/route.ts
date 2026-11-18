@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isBrowserMutation } from "@/lib/browser-mutation";
+import { track } from "@/lib/events";
 import { approveDeviceUserCode, PmtHouseError } from "@/lib/pymthouse";
 import { sessionFromRequest, sessionSecretConfigured } from "@/lib/session";
 
@@ -28,6 +29,7 @@ export async function POST(request: NextRequest) {
 
   try {
     await approveDeviceUserCode(session.externalUserId, userCode);
+    track("device_approved", {});
     return NextResponse.json({ ok: true });
   } catch (error) {
     if (error instanceof PmtHouseError) {

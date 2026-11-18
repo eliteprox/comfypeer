@@ -15,17 +15,19 @@
 
 ## Product truth (do not drift)
 
-- ComfyPeer is **real-time video** (webcam/stream → Comfy img2img → live output), not batch image generation.
-- Billing unit is **seconds of stream time** (`billable_secs`), not GPU-hours.
-- "Bring your graph" is **bounded** by nodes/models/engines baked into the live-runner image.
-- Resolution UI is a **picklist** (512² / 384×704 / 704×384), not freeform.
-- Marketing voice: calm, precise, slightly dry. Numbers over hype. No crypto vocabulary on marketing surfaces.
+- ComfyPeer is the account for Livepeer AI Streaming in ComfyUI Desktop. Install the nodes, sign in on the canvas, and stream from your graph. Billed by the second.
+- `/` is the install path. `/app` is the account overview. `/app/studio` is the web studio. `/pipelines` is remote models. `/go/install` is a redirect to the registry, not a page.
+- Desktop remote-model rates are not yet measured. Do not borrow a web-studio pipeline rate and present it as a Desktop rate.
+- Web studio pipelines stay a separate catalog. Resolution UI in the studio is a picklist (512² / 384×704 / 704×384).
+- Marketing voice: calm, precise, slightly dry. No crypto vocabulary on `/`, `/pricing`, `/pipelines`, `/docs`. No "any workflow" claim. Unmeasured numbers read "not yet measured".
+- No install-time claim. No "$5 included" until a server-side grant exists.
 - Logomark: **two-node graph with connecting edge** — reads as link at 16px, workflow at 512px.
 
 ### One-liner (canonical)
 
-> **ComfyPeer — real-time AI video from your own ComfyUI graph.**  
-> Point a camera or a stream at it, change the prompt while it's running, and watch the output change in the same second. Runs on Livepeer's GPU network. Billed by the second.
+> ComfyPeer is the account for Livepeer AI Streaming in ComfyUI Desktop. Install the nodes, sign in on the canvas, and stream from your graph. Billed by the second.
+
+Short tagline: Stream from ComfyUI Desktop. Billed by the second.
 
 ---
 
@@ -163,7 +165,7 @@ Live tickers / edge-flow animations must offer **pause** and freeze under reduce
 | Data-Dense Dashboard | App: 8–12px gaps, dense tables, KPI strips |
 | Node-graph native (brief) | Edges/ports as motif; connector curves as section dividers |
 
-**Pattern:** Real-Time / Operations Landing — hero = **live product demo**, then latency/FPS specs, then how it works, then CTA.
+**Pattern:** Desktop install landing. The hero is the install path: H1, lede, Install plus account, manager search, CLI, and a static graph diagram. A recorded canvas replaces the diagram later. The simulated browser preview sits below the fold and is labelled simulated.
 
 ---
 
@@ -263,14 +265,17 @@ Marketing: prefer full-bleed sections + hairline dividers (connector curves). Ca
 
 | Route | Job |
 |-------|-----|
-| `/` | Webcam-in · prompt-live · cost-ticker hero |
-| `/pricing` | Plan ladder + cost calculator + idle policy |
-| `/pipelines` | Curated nodes/models/resolutions (not hand-wavy `/models`) |
-| `/agents` | MCP URL + prepay (beat two; after #382) |
-| `/docs` | Quickstart, bounded workflow import, CLI |
+| `/` | Install path: Desktop hero, starter workflow, remote-model rates |
+| `/go/install` | Redirect to the Comfy registry. Not a page. Not in the sitemap. |
+| `/pricing` | Shared balance, plan ladder, web-studio worked example |
+| `/pipelines` | Remote models. Web studio pipelines are a collapsed section. |
+| `/agents` | MCP URL + prepay |
+| `/docs` | Desktop quickstart |
 | `/network` | Transparency; crypto vocab OK here only |
-| `/changelog` | Image/node releases = product releases |
-| `/login` `/signup` `/app` | Auth + stream studio shell |
+| `/changelog` | Image and node releases |
+| `/login` `/signup` | Account auth. Device approval lands on login. |
+| `/app` | Account overview |
+| `/app/studio` | Web studio (`StreamStudio`) |
 
 ---
 
@@ -285,7 +290,10 @@ Marketing: prefer full-bleed sections + hairline dividers (connector curves). Ca
 - ❌ Pie charts for spend breakdown
 - ❌ Freeform resolution inputs
 - ❌ Promising unbounded "any ComfyUI workflow"
-- ❌ Free-tier agent copy that implies $5 starter credit for agents (#409)
+- ❌ Free-tier agent copy that implies a starter credit grant for agents
+- ❌ Simulated metrics presented as measured FPS, TTFF, or cost
+- ❌ "TBD" or an unfinished verification panel on a conversion page
+- ❌ A CTA label that does not match the destination (Coming soon still linking to signup; Install labelled as something else)
 - ❌ Custom billing explain copy that diverges from API `explain`
 - ❌ Emojis as icons
 - ❌ Layout-shifting hover transforms
@@ -302,7 +310,7 @@ Document answers before shipping Studio / pricing final:
 3. Launch pipeline allowlist (`excludedCapabilities`)
 4. ~~Model storage~~ → image-baked; copy must say so
 5. v1 on `main`; agents = beat two after #382
-6. Free-tier human verification method (visible on signup)
+6. Free credit for verified GitHub accounts is not available yet. Signup must not show a TBD step or a dollar grant on the button.
 
 ---
 
@@ -313,9 +321,12 @@ Document answers before shipping Studio / pricing final:
 - [ ] All currency/duration/IDs in JetBrains Mono + tabular-nums
 - [ ] Lucide icons only; no emoji icons
 - [ ] `focus-visible` rings on all controls
-- [ ] `prefers-reduced-motion` — live demo / tickers pause or freeze
+- [ ] `prefers-reduced-motion` — live demo / tickers pause or freeze when a demo is playing
 - [ ] Touch targets ≥44px where interactive
 - [ ] Responsive: 375 / 768 / 1024 / 1440
-- [ ] Hero is webcam→prompt→output→cost, not a static mock
-- [ ] `/pipelines` reflects image contents honestly
-- [ ] No crypto vocabulary on `/`, `/pricing`, `/pipelines`
+- [ ] Hero is the install path plus a static diagram, not a fake recording or a fake FPS
+- [ ] Simulated preview is captioned as simulated and is not presented as a measured rate
+- [ ] `/pipelines` is remote models; unmeasured cells say "not yet measured"
+- [ ] No TBD panel and no grant amount on signup
+- [ ] Coming soon does not navigate
+- [ ] No crypto vocabulary on `/`, `/pricing`, `/pipelines`, `/docs`

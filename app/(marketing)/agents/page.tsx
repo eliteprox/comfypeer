@@ -34,8 +34,8 @@ export default function AgentsPage() {
 
       <div className="mt-6 rounded-lg border border-billing-warn/40 bg-elevated p-4">
         <p className="text-sm text-billing-warn">
-          Agents must prepay. The $5 starter credit is for verified humans only — agents do not
-          receive it.
+          Agents must prepay. Free credit for verified GitHub accounts is not available yet, and
+          agents do not receive starter credit.
         </p>
       </div>
 

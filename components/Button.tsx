@@ -9,6 +9,9 @@ type ButtonProps = {
   type?: "button" | "submit";
   disabled?: boolean;
   onClick?: () => void;
+  target?: string;
+  rel?: string;
+  download?: string;
 };
 
 const variants = {
@@ -29,18 +32,21 @@ export function Button({
   type = "button",
   disabled,
   onClick,
+  target,
+  rel,
+  download,
 }: ButtonProps) {
   const cls = `inline-flex items-center justify-center gap-2 rounded-md px-5 py-2.5 text-sm font-semibold transition-opacity duration-[var(--motion-base)] disabled:opacity-40 disabled:pointer-events-none ${variants[variant]} ${className}`;
   if (href && !disabled) {
-    if (href.startsWith("/auth/")) {
+    if (href.startsWith("/auth/") || target || download) {
       return (
-        <a href={href} className={cls}>
+        <a href={href} className={cls} target={target} rel={rel} download={download} onClick={onClick}>
           {children}
         </a>
       );
     }
     return (
-      <Link href={href} className={cls}>
+      <Link href={href} className={cls} onClick={onClick}>
         {children}
       </Link>
     );

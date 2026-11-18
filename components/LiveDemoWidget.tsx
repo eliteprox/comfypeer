@@ -19,7 +19,6 @@ export function LiveDemoWidget() {
   const [prompt, setPrompt] = useState("neon cyberpunk city, rain, cinematic");
   const [elapsed, setElapsed] = useState(0);
   const [cost, setCost] = useState(0);
-  const [fps, setFps] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [reducedMotion, setReducedMotion] = useState(false);
 
@@ -64,7 +63,6 @@ export function LiveDemoWidget() {
       const secs = (now - startedAtRef.current) / 1000 + accruedRef.current;
       setElapsed(secs);
       setCost(secs * RATE);
-      setFps(Math.min(30, 8 + Math.floor((secs * 3) % 5)));
     }
     rafRef.current = requestAnimationFrame(tick);
   }, [paintOutput]);
@@ -92,7 +90,6 @@ export function LiveDemoWidget() {
           paintOutput();
           setElapsed(0);
           setCost(0);
-          setFps(0);
         }
       }, 1200);
     } catch {
@@ -161,7 +158,7 @@ export function LiveDemoWidget() {
           {phase === "idle" ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-canvas/70 p-4 text-center">
               <Camera className="h-8 w-8 text-cool" strokeWidth={1.5} />
-              <p className="text-sm text-muted">Webcam in → live out. No signup.</p>
+              <p className="text-sm text-muted">Browser preview.</p>
               <div className="flex flex-wrap justify-center gap-2">
                 <button
                   type="button"
@@ -184,7 +181,7 @@ export function LiveDemoWidget() {
             <div className="absolute inset-0 flex items-center justify-center bg-canvas/60">
               <div className="flex items-center gap-2 rounded-md border border-border bg-elevated px-3 py-2 text-sm font-mono text-muted">
                 <RefreshCw className="h-4 w-4 animate-spin text-live" strokeWidth={1.75} />
-                warmup · TTFF ~1.8s
+                Starting preview
               </div>
             </div>
           ) : null}
@@ -220,17 +217,13 @@ export function LiveDemoWidget() {
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap gap-4 font-mono text-xs tabular-nums text-muted sm:text-sm">
             <span>
-              cost <span className="text-live">{formatUsd(cost)}</span>
+              cost <span className="text-live">{formatUsd(cost)}</span> estimated at{" "}
+              {formatUsd(RATE)}/s
             </span>
             <span>
               elapsed <span className="text-fg">{formatSecs(elapsed)}</span>
             </span>
-            <span>
-              fps <span className="text-fg">{fps}</span>
-            </span>
-            <span>
-              rate <span className="text-fg">{formatUsd(RATE)}/s</span>
-            </span>
+            <span>preview</span>
           </div>
           <div className="flex gap-2">
             {phase === "live" ? (
@@ -259,8 +252,7 @@ export function LiveDemoWidget() {
           </p>
         ) : null}
         <p className="mt-2 text-xs text-faint">
-          Local preview demo — cost ticker uses StreamDiffusion retail rate. Production runs
-          land on discovered orchestrators and meter via PymtHouse.
+          Simulated preview — runs in your browser, no GPU used
         </p>
       </div>
     </div>

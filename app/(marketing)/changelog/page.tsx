@@ -6,14 +6,19 @@ export const metadata: Metadata = {
 
 const ENTRIES = [
   {
+    date: "2026-11-17",
+    title: "ComfyPeer is the account for Livepeer AI Streaming",
+    body: "The site is the account, billing, and install path for Livepeer AI Streaming in ComfyUI Desktop. Nodes 1.1.0 are in progress. This change does not publish the package to the registry.",
+  },
+  {
     date: "2026-08-11",
     title: "ComfyPeer v0.1 — staging launch",
     body: "Marketing site, studio shell, PymtHouse staging wiring, three liverunner orchestrators on :8936.",
   },
   {
     date: "2026-08-11",
-    title: "Pipelines catalog",
-    body: "StreamDiffusion img2img, Krea generative, Depth control, VLM analyze — resolution presets only.",
+    title: "Web studio catalog",
+    body: "The web studio lists Video/Audio Passthrough and Inverted Color as available. StreamDiffusion img2img and Depth control remain coming. Desktop remote models are a separate list and are not yet measured.",
   },
 ];
 

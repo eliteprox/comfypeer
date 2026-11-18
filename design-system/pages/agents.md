@@ -10,7 +10,7 @@ Tool names on this page must match what the hosted MCP actually serves — verif
 
 1. MCP endpoint URL + copy
 2. Registration snippet (Ed25519 challenge → one-time `app_*_*`)
-3. **Prepay required** — agents do **not** get human $5 credit (#409)
+3. **Prepay required** — free credit for verified GitHub accounts is not available yet, and agents do not receive starter credit
 4. `create_signer_session` → SDK token → local execution narrative
 5. Point at the local client, `livepeer-python-gateway/examples/comfypeer-mcp`
 

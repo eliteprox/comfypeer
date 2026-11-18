@@ -56,8 +56,8 @@ function UsageBody() {
     <div className="mx-auto w-full max-w-2xl px-4 py-10">
       <h1 className="text-xl font-semibold text-fg">Usage</h1>
       <p className="mt-1 text-sm text-muted">
-        Available credit is the prepaid balance shown in the studio. Request counts come from the
-        same usage feed as the ComfyUI account panel.
+        Available credit is the prepaid balance on your account. This feed is a period total. It
+        does not include spend by day or per-session rows.
       </p>
       {error ? (
         <p role="alert" className="mt-4 text-sm text-billing-block">
