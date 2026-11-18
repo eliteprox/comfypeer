@@ -2,6 +2,8 @@
 
 ComfyPeer is the account for Livepeer AI Streaming in ComfyUI Desktop. Install the nodes, sign in on the canvas, and stream from your graph. Billed by the second.
 
+![Text-to-speech in ComfyUI Desktop, signed in with a ComfyPeer account](public/comfyui-text-to-speech.jpg)
+
 ## Desktop is the product, this repo is the site
 
 ComfyUI Desktop is where a graph runs. This repository is the website: the account, billing, usage, device approval, and the install path (`/go/install` redirects to the Comfy registry). The nodes ship as Livepeer AI Streaming (`livepeer-ai-nodes`), not from this repo.

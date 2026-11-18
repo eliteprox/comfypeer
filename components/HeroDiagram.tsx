@@ -1,32 +1,16 @@
-function GraphNode({ label, live = false }: { label: string; live?: boolean }) {
-  return (
-    <div
-      className={`rounded-md border px-3 py-3 text-center font-mono text-xs ${
-        live ? "border-live text-live" : "border-cool/40 bg-cool-dim/30 text-cool"
-      }`}
-    >
-      {label}
-    </div>
-  );
-}
-
-function GraphEdge() {
-  return <span aria-hidden className="h-px w-8 bg-cool sm:h-px" />;
-}
-
-/** Static stand-in. A recorded canvas replaces this frame later. */
+/** Canvas screenshot of Livepeer text-to-speech in ComfyUI Desktop. */
 export function HeroDiagram() {
   return (
-    <figure className="rounded-lg border border-border bg-surface p-6">
-      <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
-        <GraphNode label="TrickleFrameInput" />
-        <GraphEdge />
-        <GraphNode label="Start" live />
-        <GraphEdge />
-        <GraphNode label="TrickleFrameOutput" />
-      </div>
-      <figcaption className="mt-4 text-center text-xs text-faint">
-        Diagram of a starter graph. A recorded canvas will replace this frame.
+    <figure className="overflow-hidden rounded-lg border border-border bg-surface">
+      <img
+        src="/comfyui-text-to-speech.jpg"
+        alt="ComfyUI Desktop with a Livepeer Audio text-to-speech node wired to Preview Audio, and a ComfyPeer account signed in."
+        width={1024}
+        height={718}
+        className="h-auto w-full"
+      />
+      <figcaption className="px-4 py-3 text-center text-xs text-faint">
+        Text-to-speech on the ComfyUI canvas, signed in with a ComfyPeer account.
       </figcaption>
     </figure>
   );

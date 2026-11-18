@@ -14,7 +14,7 @@ Convert on installing Livepeer AI Streaming in ComfyUI Desktop. The hero is the 
 4. Secondary: Create account when signed out, Account (`/app`) when signed in.
 5. Manager search string and copyable CLI. Copy confirms with aria-live "Copied".
 6. Line: ComfyUI Desktop runs on Windows and macOS.
-7. Static diagram: TrickleFrameInput → Start → TrickleFrameOutput. Caption says a recorded canvas will replace the frame. It is not a recording. There is no canvas video.
+7. Screenshot: `public/comfyui-text-to-speech.jpg`. Livepeer · Audio text-to-speech wired to Preview Audio, with a ComfyPeer account signed in. Caption: "Text-to-speech on the ComfyUI canvas, signed in with a ComfyPeer account." It is a still. There is no canvas video.
 
 Touch targets are at least 44px.
 

@@ -165,7 +165,7 @@ Live tickers / edge-flow animations must offer **pause** and freeze under reduce
 | Data-Dense Dashboard | App: 8–12px gaps, dense tables, KPI strips |
 | Node-graph native (brief) | Edges/ports as motif; connector curves as section dividers |
 
-**Pattern:** Desktop install landing. The hero is the install path: H1, lede, Install plus account, manager search, CLI, and a static graph diagram. A recorded canvas replaces the diagram later. The simulated browser preview sits below the fold and is labelled simulated.
+**Pattern:** Desktop install landing. The hero is the install path: H1, lede, Install plus account, manager search, CLI, and a still of the ComfyUI canvas (`public/comfyui-text-to-speech.jpg`). The simulated browser preview sits below the fold and is labelled simulated.
 
 ---
 

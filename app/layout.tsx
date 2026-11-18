@@ -15,11 +15,20 @@ export const metadata: Metadata = {
     description: SITE.oneLiner,
     siteName: SITE.name,
     type: "website",
+    images: [
+      {
+        url: "/comfyui-text-to-speech.jpg",
+        width: 1024,
+        height: 718,
+        alt: "Text-to-speech in ComfyUI Desktop, signed in with a ComfyPeer account.",
+      },
+    ],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: `${SITE.name} — ${SITE.tagline}`,
     description: SITE.oneLiner,
+    images: ["/comfyui-text-to-speech.jpg"],
   },
 };
 
